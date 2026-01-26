@@ -56,14 +56,15 @@ bot.on("message", async (ctx) => {
       timestamp: new Date().toISOString(),
     });
 
-    // Push to event queue
+    // Push to event queue with streaming verbosity by default
     const eventId = pushEvent("telegram:message", "telegram", {
       chat_id: chatId,
       from,
       text,
+      verbosity: "streaming",
     });
 
-    console.log(JSON.stringify({ chat_id: chatId, from, text, event_id: eventId }));
+    console.log(JSON.stringify({ chat_id: chatId, from, text, event_id: eventId }, null, 2));
 
     if (mode === "once") {
       bot.stop();
@@ -92,15 +93,16 @@ bot.on("message", async (ctx) => {
         timestamp: new Date().toISOString(),
       });
 
-      // Push to event queue with image path
+      // Push to event queue with image path and streaming verbosity
       const eventId = pushEvent("telegram:photo", "telegram", {
         chat_id: chatId,
         from,
         caption,
         image_path: imagePath,
+        verbosity: "streaming",
       });
 
-      console.log(JSON.stringify({ chat_id: chatId, from, caption, image_path: imagePath, event_id: eventId }));
+      console.log(JSON.stringify({ chat_id: chatId, from, caption, image_path: imagePath, event_id: eventId }, null, 2));
 
       if (mode === "once") {
         bot.stop();

@@ -19,6 +19,8 @@ interface CronJob {
   prompt: string;
   created_at: string;
   updated_at: string;
+  run_once?: boolean;        // If true, delete after first run
+  run_at?: string;           // ISO timestamp for one-off delayed tasks
 }
 
 interface CronConfig {
@@ -43,6 +45,48 @@ function saveConfig(config: CronConfig): void {
     fs.mkdirSync(dir, { recursive: true });
   }
   fs.writeFileSync(CRON_CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+// Parse delay strings like "in 5 minutes", "in 1 hour", "at 3pm", "at 15:30"
+function parseDelay(delay: string): Date | null {
+  const now = new Date();
+  const lower = delay.toLowerCase().trim();
+
+  // "in X minutes/hours/seconds"
+  const inMatch = lower.match(/^in\s+(\d+)\s+(second|minute|hour|day)s?$/);
+  if (inMatch) {
+    const amount = parseInt(inMatch[1]);
+    const unit = inMatch[2];
+    const ms = {
+      second: 1000,
+      minute: 60 * 1000,
+      hour: 60 * 60 * 1000,
+      day: 24 * 60 * 60 * 1000,
+    }[unit] || 60 * 1000;
+    return new Date(now.getTime() + amount * ms);
+  }
+
+  // "at Xam/pm" or "at HH:MM"
+  const atMatch = lower.match(/^at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (atMatch) {
+    let hour = parseInt(atMatch[1]);
+    const minute = atMatch[2] ? parseInt(atMatch[2]) : 0;
+    const ampm = atMatch[3];
+
+    if (ampm === "pm" && hour < 12) hour += 12;
+    if (ampm === "am" && hour === 12) hour = 0;
+
+    const target = new Date(now);
+    target.setHours(hour, minute, 0, 0);
+
+    // If time has passed today, schedule for tomorrow
+    if (target <= now) {
+      target.setDate(target.getDate() + 1);
+    }
+    return target;
+  }
+
+  return null;
 }
 
 const server = new Server(
@@ -166,6 +210,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ["id"],
+      },
+    },
+    {
+      name: "schedule_once",
+      description: "Schedule a one-off task to run at a specific time or after a delay. The task will automatically be deleted after it runs.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          delay: {
+            type: "string",
+            description: "When to run. Supports: 'in 5 minutes', 'in 1 hour', 'in 30 seconds', 'at 3pm', 'at 15:30'",
+          },
+          description: {
+            type: "string",
+            description: "Short description of what this task does",
+          },
+          prompt: {
+            type: "string",
+            description: "The full instructions for what to do when this task runs",
+          },
+        },
+        required: ["delay", "description", "prompt"],
       },
     },
   ],
@@ -343,6 +409,56 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         {
           type: "text",
           text: `Job: ${job.id}\n\nSchedule: ${job.schedule}\nDescription: ${job.description}\nStatus: ${job.enabled ? "enabled" : "disabled"}\nCreated: ${job.created_at}\nUpdated: ${job.updated_at}\n\nPrompt:\n${job.prompt}`,
+        },
+      ],
+    };
+  }
+
+  if (name === "schedule_once") {
+    const { delay, description, prompt } = args as {
+      delay: string;
+      description: string;
+      prompt: string;
+    };
+
+    const runAt = parseDelay(delay);
+    if (!runAt) {
+      return {
+        content: [{ type: "text", text: `Could not parse delay: "${delay}". Try formats like "in 5 minutes", "in 1 hour", "at 3pm", "at 15:30"` }],
+        isError: true,
+      };
+    }
+
+    const config = loadConfig();
+    const now = new Date().toISOString();
+
+    const newJob: CronJob = {
+      id: randomUUID().slice(0, 8),
+      enabled: true,
+      schedule: `once at ${runAt.toISOString()}`,
+      description,
+      prompt,
+      created_at: now,
+      updated_at: now,
+      run_once: true,
+      run_at: runAt.toISOString(),
+    };
+
+    config.jobs.push(newJob);
+    saveConfig(config);
+
+    // Calculate human-readable time
+    const diffMs = runAt.getTime() - Date.now();
+    const diffMins = Math.round(diffMs / 60000);
+    const timeStr = diffMins < 60
+      ? `${diffMins} minute${diffMins !== 1 ? 's' : ''}`
+      : `${Math.round(diffMins / 60)} hour${Math.round(diffMins / 60) !== 1 ? 's' : ''}`;
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Scheduled one-off task "${newJob.id}":\n• Runs in: ${timeStr} (${runAt.toLocaleTimeString()})\n• Description: ${description}\n\nThis task will auto-delete after it runs.`,
         },
       ],
     };

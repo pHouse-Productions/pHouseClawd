@@ -27,7 +27,8 @@ function generateSessionId(name: string): string {
 const PENDING_DIR = "/home/ubuntu/pHouseClawd/events/pending";
 const SEND_SCRIPT = "/home/ubuntu/pHouseClawd/integrations/telegram/src/send.ts";
 const LOGS_DIR = "/home/ubuntu/pHouseClawd/logs";
-const LOG_FILE = path.join(LOGS_DIR, "claude.log");
+const LOG_FILE = path.join(LOGS_DIR, "watcher.log");  // Watcher operational logs
+const STREAM_LOG = path.join(LOGS_DIR, "claude-stream.jsonl");  // Raw Claude stream events
 const SESSIONS_FILE = path.join(LOGS_DIR, "sessions.json");
 const CRON_CONFIG_FILE = "/home/ubuntu/pHouseClawd/config/cron.json";
 const POLL_INTERVAL = 1000; // Check every second
@@ -39,35 +40,73 @@ interface CronJob {
   schedule: string;
   description: string;
   prompt: string;
+  run_once?: boolean;
+  run_at?: string;
 }
 
 interface CronConfig {
   jobs: CronJob[];
 }
 
-// Track active cron tasks
+// Track active cron tasks and one-off timeouts
 const activeCronTasks: Map<string, cron.ScheduledTask> = new Map();
+const activeTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
 // Ensure logs directory exists
 if (!fs.existsSync(LOGS_DIR)) {
   fs.mkdirSync(LOGS_DIR, { recursive: true });
 }
 
-// Track known sessions
-function getKnownSessions(): Set<string> {
+// Track known sessions and their generations
+interface SessionData {
+  known: string[];
+  generations: Record<string, number>;  // sessionKey -> generation counter
+}
+
+function loadSessionData(): SessionData {
   try {
     if (fs.existsSync(SESSIONS_FILE)) {
       const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf-8"));
-      return new Set(data);
+      // Handle legacy format (just an array of session IDs)
+      if (Array.isArray(data)) {
+        return { known: data, generations: {} };
+      }
+      return data;
     }
   } catch {}
-  return new Set();
+  return { known: [], generations: {} };
+}
+
+function saveSessionData(data: SessionData): void {
+  fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
+}
+
+function getKnownSessions(): Set<string> {
+  return new Set(loadSessionData().known);
 }
 
 function markSessionKnown(sessionId: string): void {
-  const sessions = getKnownSessions();
-  sessions.add(sessionId);
-  fs.writeFileSync(SESSIONS_FILE, JSON.stringify([...sessions], null, 2));
+  const data = loadSessionData();
+  if (!data.known.includes(sessionId)) {
+    data.known.push(sessionId);
+  }
+  saveSessionData(data);
+}
+
+function clearSession(sessionKey: string): void {
+  const data = loadSessionData();
+  // Get the current generation's session ID before incrementing
+  const currentGen = data.generations[sessionKey] || 0;
+  const oldSessionId = generateSessionId(`${sessionKey}-gen${currentGen}`);
+  // Remove old session ID from known list
+  data.known = data.known.filter(id => id !== oldSessionId);
+  // Increment generation so next session gets a new ID
+  data.generations[sessionKey] = currentGen + 1;
+  saveSessionData(data);
+}
+
+function getSessionGeneration(sessionKey: string): number {
+  return loadSessionData().generations[sessionKey] || 0;
 }
 
 // Lock to prevent concurrent processing
@@ -81,16 +120,34 @@ function log(message: string) {
   process.stdout.write(line);
 }
 
-function logSection(title: string, content: string) {
-  const divider = "=".repeat(60);
-  const section = `\n${divider}\n${title}\n${divider}\n${content}\n`;
-  fs.appendFileSync(LOG_FILE, section);
-  process.stdout.write(section);
+// Log a raw stream event to JSONL (adds timestamp wrapper)
+function logStreamEvent(event: any) {
+  const entry = {
+    ts: new Date().toISOString(),
+    ...event
+  };
+  fs.appendFileSync(STREAM_LOG, JSON.stringify(entry) + "\n");
 }
 
-// Send status update to Telegram
-async function relayStatus(chatId: number, message: string): Promise<void> {
-  if (!message) return;
+// Verbosity levels for chat surfaces
+type Verbosity = "streaming" | "progress" | "final";
+
+// Message buffer for batching relay messages
+interface RelayBuffer {
+  chatId: number;
+  verbosity: Verbosity;
+  textBuffer: string;
+  lastFlush: number;
+  flushTimer: NodeJS.Timeout | null;
+}
+
+const FLUSH_INTERVAL_MS = 2000; // Batch messages every 2 seconds
+const MIN_CHARS_TO_FLUSH = 50; // Or flush when we have this many chars
+
+
+// Send message to Telegram (fire and forget)
+async function sendToTelegram(chatId: number, message: string): Promise<void> {
+  if (!message || !message.trim()) return;
 
   try {
     const proc = spawn("npx", ["tsx", SEND_SCRIPT, String(chatId), message], {
@@ -99,71 +156,97 @@ async function relayStatus(chatId: number, message: string): Promise<void> {
       detached: true,
     });
     proc.unref();
+    log(`[Relay] Sent to Telegram ${chatId}: ${message.slice(0, 100)}${message.length > 100 ? '...' : ''}`);
   } catch (err) {
-    log(`[Watcher] Failed to relay status: ${err}`);
+    log(`[Relay] Failed to send to Telegram: ${err}`);
   }
 }
 
-function formatStreamEvent(event: any): string | null {
-  const ts = new Date().toISOString().slice(11, 19);
+// Flush buffered text to chat surface
+function flushBuffer(buffer: RelayBuffer): void {
+  if (buffer.flushTimer) {
+    clearTimeout(buffer.flushTimer);
+    buffer.flushTimer = null;
+  }
+
+  const text = buffer.textBuffer.trim();
+  if (text) {
+    sendToTelegram(buffer.chatId, text);
+    buffer.textBuffer = "";
+  }
+  buffer.lastFlush = Date.now();
+}
+
+// Add text to buffer, flushing if needed
+function bufferText(buffer: RelayBuffer, text: string): void {
+  buffer.textBuffer += text;
+
+  // Flush if we have enough text or it's been a while
+  const timeSinceFlush = Date.now() - buffer.lastFlush;
+  if (buffer.textBuffer.length >= MIN_CHARS_TO_FLUSH || timeSinceFlush > FLUSH_INTERVAL_MS) {
+    flushBuffer(buffer);
+  } else if (!buffer.flushTimer) {
+    // Set a timer to flush later
+    buffer.flushTimer = setTimeout(() => flushBuffer(buffer), FLUSH_INTERVAL_MS);
+  }
+}
+
+// Create a new relay buffer for a chat session
+function createRelayBuffer(chatId: number, verbosity: Verbosity): RelayBuffer {
+  return {
+    chatId,
+    verbosity,
+    textBuffer: "",
+    lastFlush: Date.now(),
+    flushTimer: null,
+  };
+}
+
+interface RelayInfo {
+  text: string | null;      // Text to relay to chat
+  progress: string | null;  // Progress update (tool use, errors)
+}
+
+// Extract relay info from a stream event
+function getRelayInfo(event: any): RelayInfo {
+  const result: RelayInfo = { text: null, progress: null };
 
   switch (event.type) {
     case "assistant":
-      // Assistant text output
+      // Claude CLI gives us complete messages, not deltas
       if (event.message?.content) {
         const text = event.message.content
           .filter((c: any) => c.type === "text")
           .map((c: any) => c.text)
           .join("");
-        if (text) return `[${ts}] 🤖 ${text}`;
+        if (text) result.text = text;
       }
-      return null;
+      break;
 
     case "content_block_start":
       if (event.content_block?.type === "tool_use") {
-        return `[${ts}] 🔧 Tool: ${event.content_block.name}`;
+        result.progress = `Using ${event.content_block.name}...`;
       }
-      if (event.content_block?.type === "thinking") {
-        return `[${ts}] 💭 Thinking...`;
-      }
-      return null;
+      break;
 
     case "content_block_delta":
-      if (event.delta?.type === "thinking_delta") {
-        return `[${ts}] 💭 ${event.delta.thinking}`;
-      }
+      // Handle streaming deltas if they ever appear
       if (event.delta?.type === "text_delta") {
-        return `[${ts}] 📝 ${event.delta.text}`;
+        result.text = event.delta.text;
       }
-      if (event.delta?.type === "input_json_delta") {
-        return null; // Skip raw JSON deltas, too noisy
-      }
-      return null;
-
-    case "content_block_stop":
-      return null; // Skip these
-
-    case "result":
-      // Final result
-      if (event.result) {
-        return `[${ts}] ✅ Result: ${event.result.slice(0, 200)}${event.result.length > 200 ? "..." : ""}`;
-      }
-      return null;
+      break;
 
     case "error":
-      return `[${ts}] ❌ Error: ${event.error?.message || JSON.stringify(event)}`;
-
-    case "system":
-      return `[${ts}] ℹ️ ${event.message || JSON.stringify(event)}`;
-
-    default:
-      // Log unknown event types for debugging
-      return `[${ts}] [${event.type}] ${JSON.stringify(event).slice(0, 100)}`;
+      result.progress = `Error: ${event.error?.message || 'Unknown error'}`;
+      break;
   }
+
+  return result;
 }
 
 async function handleEvent(event: Event): Promise<void> {
-  log(`[Watcher] Processing event: ${event.type} from ${event.source}`);
+  log(`[Watcher] Processing: ${event.type} from ${event.source}`);
+  log(`[Watcher] Payload: ${JSON.stringify(event.payload)}`);
 
   // Build prompt and session key based on event type
   let prompt: string;
@@ -172,27 +255,72 @@ async function handleEvent(event: Event): Promise<void> {
   // Track if we need to pass an image to Claude
   let imagePath: string | null = null;
 
+  // Check for /new command to start fresh session
+  let forceNewSession = false;
+
+  // Relay buffer for streaming output to chat surfaces
+  let relayBuffer: RelayBuffer | null = null;
+
   switch (event.type) {
     case "telegram:message":
-      const { chat_id, from, text } = event.payload as {
+      const { chat_id, from, text, verbosity: msgVerbosity } = event.payload as {
         chat_id: number;
         from: string;
         text: string;
+        verbosity?: Verbosity;
       };
 
+      // Default telegram to streaming verbosity
+      relayBuffer = createRelayBuffer(chat_id, msgVerbosity || "streaming");
+
       sessionKey = `telegram-${chat_id}`;
+
+      // Handle /new command
+      if (text.trim().toLowerCase() === "/new") {
+        clearSession(sessionKey);
+        log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
+        // Send confirmation and return early - no need to invoke Claude
+        const sendScript = "/home/ubuntu/pHouseClawd/integrations/telegram/src/send.ts";
+        spawn("npx", ["tsx", sendScript, String(chat_id), "Fresh start, boss. New session is ready."], {
+          cwd: "/home/ubuntu/pHouseClawd",
+          stdio: ["ignore", "ignore", "ignore"],
+          detached: true,
+        }).unref();
+        return;
+      }
+
+      // Handle /restart command
+      if (text.trim().toLowerCase() === "/restart") {
+        log(`[Watcher] Restart requested via /restart command`);
+        const sendScript = "/home/ubuntu/pHouseClawd/integrations/telegram/src/send.ts";
+        spawn("npx", ["tsx", sendScript, String(chat_id), "Restarting... Back in a few seconds."], {
+          cwd: "/home/ubuntu/pHouseClawd",
+          stdio: ["ignore", "ignore", "ignore"],
+          detached: true,
+        }).unref();
+        // Trigger restart script in background (detached so it survives our death)
+        spawn("/home/ubuntu/pHouseClawd/restart.sh", [], {
+          cwd: "/home/ubuntu/pHouseClawd",
+          stdio: ["ignore", "ignore", "ignore"],
+          detached: true,
+        }).unref();
+        return;
+      }
+
       prompt = `[Telegram from ${from}]: ${text}`;
       break;
 
     case "telegram:photo":
-      const { chat_id: photoChatId, from: photoFrom, caption, image_path } = event.payload as {
+      const { chat_id: photoChatId, from: photoFrom, caption, image_path, verbosity: photoVerbosity } = event.payload as {
         chat_id: number;
         from: string;
         caption: string;
         image_path: string;
+        verbosity?: Verbosity;
       };
 
       sessionKey = `telegram-${photoChatId}`;
+      relayBuffer = createRelayBuffer(photoChatId, photoVerbosity || "streaming");
       imagePath = image_path;
       prompt = caption
         ? `[Telegram photo from ${photoFrom}]: ${caption}\n\nIMPORTANT: User sent an image. Use the Read tool to view the image at: ${image_path}`
@@ -235,8 +363,9 @@ ${body}`;
       prompt = `[Event: ${event.type}] ${JSON.stringify(event.payload)}`;
   }
 
-  // Generate deterministic UUID for this session
-  const sessionId = generateSessionId(sessionKey);
+  // Generate deterministic UUID for this session (including generation counter)
+  const generation = getSessionGeneration(sessionKey);
+  const sessionId = generateSessionId(`${sessionKey}-gen${generation}`);
   const knownSessions = getKnownSessions();
   const isNewSession = !knownSessions.has(sessionId);
 
@@ -247,8 +376,7 @@ ${body}`;
 
   // Spawn Claude to handle the event
   return new Promise((resolve, reject) => {
-    log(`[Watcher] Spawning Claude for event: ${event.type}`);
-    logSection("PROMPT", prompt);
+    log(`[Watcher] Spawning Claude with prompt: ${prompt.slice(0, 100)}...`);
 
     // Use --session-id for new sessions, --resume for existing
     const sessionArg = isNewSession
@@ -291,15 +419,26 @@ ${body}`;
         if (!line.trim()) continue;
         try {
           const streamEvent = JSON.parse(line);
-          const formatted = formatStreamEvent(streamEvent);
-          if (formatted) {
-            fs.appendFileSync(LOG_FILE, formatted + "\n");
-            process.stdout.write(formatted + "\n");
+
+          // Log every event to JSONL
+          logStreamEvent(streamEvent);
+
+          // Extract relay info and send to chat if applicable
+          const { text, progress } = getRelayInfo(streamEvent);
+
+          if (relayBuffer && text) {
+            if (relayBuffer.verbosity === "streaming") {
+              bufferText(relayBuffer, text);
+            } else if (relayBuffer.verbosity === "final") {
+              relayBuffer.textBuffer += text;
+            }
+          }
+          if (relayBuffer && relayBuffer.verbosity === "progress" && progress) {
+            sendToTelegram(relayBuffer.chatId, progress);
           }
         } catch {
-          // Not JSON, output as-is
-          fs.appendFileSync(LOG_FILE, line + "\n");
-          process.stdout.write(line + "\n");
+          // Not JSON, log raw line
+          log(`[Stream] Non-JSON: ${line}`);
         }
       }
     });
@@ -312,13 +451,21 @@ ${body}`;
     });
 
     proc.on("close", (code) => {
-      logSection("CLAUDE OUTPUT COMPLETE", `Exit code: ${code}`);
+      log(`[Watcher] Claude exited with code ${code}`);
+
+      // Flush any remaining buffered text
+      if (relayBuffer) {
+        if (relayBuffer.flushTimer) {
+          clearTimeout(relayBuffer.flushTimer);
+          relayBuffer.flushTimer = null;
+        }
+        if (relayBuffer.textBuffer.trim()) {
+          sendToTelegram(relayBuffer.chatId, relayBuffer.textBuffer.trim());
+        }
+      }
 
       if (code !== 0) {
-        log(`[Watcher] Claude exited with code ${code}`);
-        if (stderr) {
-          logSection("STDERR", stderr);
-        }
+        log(`[Watcher] Claude error - stderr: ${stderr}`);
         reject(new Error(stderr));
       } else {
         log(`[Watcher] Claude finished handling event successfully`);
@@ -431,6 +578,20 @@ function loadCronConfig(): CronConfig {
   return { jobs: [] };
 }
 
+function saveCronConfig(config: CronConfig): void {
+  fs.writeFileSync(CRON_CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+function deleteJob(jobId: string): void {
+  const config = loadCronConfig();
+  const index = config.jobs.findIndex((j) => j.id === jobId);
+  if (index !== -1) {
+    config.jobs.splice(index, 1);
+    saveCronConfig(config);
+    log(`[Cron] Deleted one-off job: ${jobId}`);
+  }
+}
+
 function scheduleCronJobs(): void {
   // Stop all existing cron tasks
   for (const [id, task] of activeCronTasks) {
@@ -439,7 +600,16 @@ function scheduleCronJobs(): void {
   }
   activeCronTasks.clear();
 
+  // Clear all existing timeouts
+  for (const [id, timeout] of activeTimeouts) {
+    clearTimeout(timeout);
+    log(`[Cron] Cleared timeout: ${id}`);
+  }
+  activeTimeouts.clear();
+
   const config = loadCronConfig();
+  let recurringCount = 0;
+  let oneOffCount = 0;
 
   for (const job of config.jobs) {
     if (!job.enabled) {
@@ -447,6 +617,45 @@ function scheduleCronJobs(): void {
       continue;
     }
 
+    // Handle one-off tasks with run_at
+    if (job.run_once && job.run_at) {
+      const runAt = new Date(job.run_at);
+      const now = new Date();
+      const delayMs = runAt.getTime() - now.getTime();
+
+      if (delayMs <= 0) {
+        // Already past, run immediately and delete
+        log(`[Cron] One-off job ${job.id} is past due, running now`);
+        pushEvent("cron:job", "cron", {
+          job_id: job.id,
+          job_description: job.description,
+          job_prompt: job.prompt,
+          run_once: true,
+        });
+        deleteJob(job.id);
+      } else {
+        // Schedule for future
+        const timeout = setTimeout(() => {
+          log(`[Cron] Triggering one-off job: ${job.id} (${job.description})`);
+          pushEvent("cron:job", "cron", {
+            job_id: job.id,
+            job_description: job.description,
+            job_prompt: job.prompt,
+            run_once: true,
+          });
+          deleteJob(job.id);
+          activeTimeouts.delete(job.id);
+        }, delayMs);
+
+        activeTimeouts.set(job.id, timeout);
+        const mins = Math.round(delayMs / 60000);
+        log(`[Cron] Scheduled one-off job: ${job.id} to run in ${mins} minutes`);
+        oneOffCount++;
+      }
+      continue;
+    }
+
+    // Handle recurring cron jobs
     const cronExpression = parseSchedule(job.schedule);
 
     if (!cron.validate(cronExpression)) {
@@ -465,9 +674,10 @@ function scheduleCronJobs(): void {
 
     activeCronTasks.set(job.id, task);
     log(`[Cron] Scheduled job: ${job.id} with schedule "${job.schedule}" -> "${cronExpression}"`);
+    recurringCount++;
   }
 
-  log(`[Cron] ${activeCronTasks.size} jobs scheduled`);
+  log(`[Cron] ${recurringCount} recurring jobs, ${oneOffCount} one-off tasks scheduled`);
 }
 
 async function watch(): Promise<void> {

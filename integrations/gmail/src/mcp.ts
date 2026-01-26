@@ -174,13 +174,22 @@ async function sendEmail(
   to: string,
   subject: string,
   body: string,
-  html?: string
+  html?: string,
+  cc?: string,
+  bcc?: string
 ): Promise<string> {
   const messageParts = [
     `To: ${to}`,
     `Subject: ${subject}`,
     "MIME-Version: 1.0",
   ];
+
+  if (cc) {
+    messageParts.splice(1, 0, `Cc: ${cc}`);
+  }
+  if (bcc) {
+    messageParts.splice(cc ? 2 : 1, 0, `Bcc: ${bcc}`);
+  }
 
   if (html) {
     const boundary = "boundary_" + Date.now();
@@ -285,6 +294,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             description: "Optional HTML email body",
           },
+          cc: {
+            type: "string",
+            description: "CC recipient(s) - comma-separated for multiple",
+          },
+          bcc: {
+            type: "string",
+            description: "BCC recipient(s) - comma-separated for multiple",
+          },
         },
         required: ["to", "subject", "body"],
       },
@@ -335,15 +352,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "send_email") {
-    const { to, subject, body, html } = args as {
+    const { to, subject, body, html, cc, bcc } = args as {
       to: string;
       subject: string;
       body: string;
       html?: string;
+      cc?: string;
+      bcc?: string;
     };
 
     try {
-      const messageId = await sendEmail(to, subject, body, html);
+      const messageId = await sendEmail(to, subject, body, html, cc, bcc);
       return {
         content: [
           { type: "text", text: `Email sent successfully. Message ID: ${messageId}` },

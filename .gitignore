@@ -47,3 +47,12 @@ events/processed/*.json
 
 # Personal notes
 notes/
+
+# Sales leads (personal business data)
+leads/
+
+# Client websites (each has its own GitHub repo)
+websites/
+
+# Claude skills (personal workflows)
+.claude/
