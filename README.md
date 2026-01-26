@@ -11,8 +11,18 @@ A personal AI assistant framework built on Claude Code. Create your own AI assis
 - **Web Browsing** - Playwright-powered web automation
 - **Persistent Memory** - Your assistant remembers context across sessions
 
+## Important: Dedicated Machine Required
+
+This assistant runs with full system access and needs to operate autonomously. **Run this on its own dedicated computer or VM** - not your personal machine. A cheap VPS, Raspberry Pi, or spare laptop works great.
+
+Why? Your assistant needs to:
+- Execute commands without asking for permission every time
+- Run background processes 24/7
+- Access your email, send messages, browse the web on your behalf
+
 ## Prerequisites
 
+- A dedicated machine (VPS, VM, Raspberry Pi, etc.)
 - Node.js 22+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 
@@ -25,11 +35,13 @@ git clone https://github.com/pHouse-Productions/pHouseClawd.git
 cd pHouseClawd
 ```
 
-### 2. Run Claude Code
+### 2. Run Claude Code with full access
 
 ```bash
-claude
+claude --dangerously-skip-permissions
 ```
+
+The `--dangerously-skip-permissions` flag lets Claude operate autonomously without prompting for every action. This is required for the assistant to function properly.
 
 ### 3. Tell Claude what you want
 
