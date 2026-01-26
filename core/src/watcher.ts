@@ -38,6 +38,30 @@ const SESSIONS_FILE = path.join(LOGS_DIR, "sessions.json");
 const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
 const POLL_INTERVAL = 1000; // Check every second
 
+// Email security config - loaded from config/email-security.json
+const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-security.json");
+
+interface EmailSecurityConfig {
+  trustedEmailAddresses: string[];
+  alertTelegramChatId: number | null;
+}
+
+function loadEmailSecurityConfig(): EmailSecurityConfig {
+  try {
+    if (fs.existsSync(EMAIL_SECURITY_CONFIG_FILE)) {
+      const config = JSON.parse(fs.readFileSync(EMAIL_SECURITY_CONFIG_FILE, "utf-8"));
+      return {
+        trustedEmailAddresses: config.trustedEmailAddresses || [],
+        alertTelegramChatId: config.alertTelegramChatId || null,
+      };
+    }
+  } catch (err) {
+    log(`[Security] Failed to load email security config: ${err}`);
+  }
+  // Default: no trusted addresses (all emails forwarded to Telegram if configured)
+  return { trustedEmailAddresses: [], alertTelegramChatId: null };
+}
+
 // Cron job interface
 interface CronJob {
   id: string;
@@ -375,6 +399,24 @@ async function handleEvent(event: Event): Promise<void> {
         thread_id?: string;
         message_id?: string;
       };
+
+      // SECURITY CHECK: Load config and check if sender is trusted
+      const emailSecurityConfig = loadEmailSecurityConfig();
+      const emailAddress = emailFrom.match(/<(.+)>/)?.[1] || emailFrom;
+      const isTrustedSender = emailSecurityConfig.trustedEmailAddresses.some(
+        (trusted) => trusted.toLowerCase() === emailAddress.toLowerCase()
+      );
+
+      if (!isTrustedSender) {
+        // Untrusted sender - notify on Telegram if configured, do NOT reply directly
+        log(`[Security] Untrusted email sender: ${emailFrom} - blocking auto-reply`);
+
+        if (emailSecurityConfig.alertTelegramChatId) {
+          const alertMessage = `Got an email from an untrusted address. Not replying directly.\n\nFrom: ${emailFrom}\nSubject: ${subject}\nDate: ${date}\n\n${body.slice(0, 500)}${body.length > 500 ? '...' : ''}\n\nReply here if you want me to respond.`;
+          await sendToTelegram(emailSecurityConfig.alertTelegramChatId, alertMessage);
+        }
+        return; // Skip Claude invocation entirely
+      }
 
       // Use thread_id if available, otherwise use subject as session key
       sessionKey = `email-${thread_id || subject.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 50)}`;

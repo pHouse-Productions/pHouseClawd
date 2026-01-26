@@ -10,6 +10,7 @@ dist/
 # Personal configuration (use .example as template)
 CLAUDE.md
 config/cron.json
+config/email-security.json
 
 # Gmail OAuth tokens and secrets (personal)
 integrations/gmail/tokens.json

@@ -83,7 +83,8 @@ Claude will:
 pHouseClawd/
 ├── CLAUDE.md              # Your assistant's personality and instructions
 ├── config/
-│   └── cron.json          # Scheduled tasks configuration
+│   ├── cron.json          # Scheduled tasks
+│   └── email-security.json # Email security settings
 ├── core/
 │   └── src/
 │       ├── watcher.ts     # Main event processor
@@ -98,9 +99,37 @@ pHouseClawd/
 └── logs/                  # Application logs (gitignored)
 ```
 
+## Configuration
+
+All configuration is managed by Claude through JSON files in the `config/` directory. You don't need to edit these manually - just tell Claude what you want and it will update the configs.
+
+**Configuration files (all gitignored, created by Claude during setup):**
+
+| File | Purpose |
+|------|---------|
+| `CLAUDE.md` | Your assistant's personality, your info, preferences |
+| `config/cron.json` | Scheduled tasks and reminders |
+| `config/email-security.json` | Trusted email addresses for auto-reply |
+
+**Example commands:**
+- "Add john@example.com to my trusted email list"
+- "Remind me to check my calendar every morning at 9am"
+- "Update my address to 123 Main St"
+
+Claude reads and writes these files directly - no manual editing needed.
+
+## Email Security
+
+When Gmail integration is enabled, your assistant will only auto-reply to emails from addresses you've explicitly trusted. Emails from unknown addresses are forwarded to you on Telegram for review.
+
+To add trusted email addresses, just tell Claude:
+> "Trust emails from mywork@company.com"
+
+This prevents your assistant from responding to spam, phishing attempts, or impersonators.
+
 ## Customization
 
-Your assistant's personality lives in `CLAUDE.md`. Edit it to customize:
+Your assistant's personality lives in `CLAUDE.md`. Tell Claude how you want to customize:
 - Name and identity
 - Communication style (formal, casual, funny, whatever)
 - Your personal info and preferences
@@ -128,7 +157,7 @@ Your assistant comes with a web dashboard at `http://your-server:3000`. Claude w
 git pull origin main
 ```
 
-Your personal files (`CLAUDE.md`, `.env` files, `memory/`, `notes/`) are gitignored and won't be affected.
+Your personal files (`CLAUDE.md`, `config/*.json`, `memory/`, `notes/`) are gitignored and won't be affected.
 
 ## License
 
