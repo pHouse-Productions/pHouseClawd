@@ -44,6 +44,7 @@ const gmail = google.gmail({ version: "v1", auth });
 interface EmailSummary {
   id: string;
   threadId: string;
+  messageId: string;  // Message-ID header for threading
   from: string;
   to: string;
   subject: string;
@@ -54,6 +55,7 @@ interface EmailSummary {
 interface EmailFull {
   id: string;
   threadId: string;
+  messageId: string;  // Message-ID header for threading
   from: string;
   to: string;
   subject: string;
@@ -129,7 +131,7 @@ async function fetchEmails(
       userId: "me",
       id: msg.id!,
       format: "metadata",
-      metadataHeaders: ["From", "To", "Subject", "Date"],
+      metadataHeaders: ["From", "To", "Subject", "Date", "Message-ID"],
     });
 
     const headers = detail.data.payload?.headers || [];
@@ -137,6 +139,7 @@ async function fetchEmails(
     emails.push({
       id: msg.id!,
       threadId: msg.threadId!,
+      messageId: getHeader(headers, "Message-ID"),
       from: getHeader(headers, "From"),
       to: getHeader(headers, "To"),
       subject: getHeader(headers, "Subject"),
@@ -161,6 +164,7 @@ async function fetchEmailById(id: string): Promise<EmailFull> {
   return {
     id: detail.data.id!,
     threadId: detail.data.threadId!,
+    messageId: getHeader(headers, "Message-ID"),
     from: getHeader(headers, "From"),
     to: getHeader(headers, "To"),
     subject: getHeader(headers, "Subject"),
@@ -203,13 +207,21 @@ async function sendEmail(
   html?: string,
   cc?: string,
   bcc?: string,
-  attachments?: string[]
+  attachments?: string[],
+  threadId?: string,
+  inReplyTo?: string
 ): Promise<string> {
   const messageParts = [
     `To: ${to}`,
     `Subject: ${subject}`,
     "MIME-Version: 1.0",
   ];
+
+  // Add threading headers if replying to an existing message
+  if (inReplyTo) {
+    messageParts.push(`In-Reply-To: ${inReplyTo}`);
+    messageParts.push(`References: ${inReplyTo}`);
+  }
 
   if (cc) {
     messageParts.splice(1, 0, `Cc: ${cc}`);
@@ -289,11 +301,18 @@ async function sendEmail(
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 
+  const requestBody: { raw: string; threadId?: string } = {
+    raw: encodedMessage,
+  };
+
+  // Include threadId to keep the reply in the same thread
+  if (threadId) {
+    requestBody.threadId = threadId;
+  }
+
   const response = await gmail.users.messages.send({
     userId: "me",
-    requestBody: {
-      raw: encodedMessage,
-    },
+    requestBody,
   });
 
   return response.data.id || "sent";
@@ -381,6 +400,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
               type: "string",
             },
           },
+          thread_id: {
+            type: "string",
+            description: "Thread ID to reply within (keeps reply in same conversation)",
+          },
+          in_reply_to: {
+            type: "string",
+            description: "Message-ID header of the email being replied to",
+          },
         },
         required: ["to", "subject", "body"],
       },
@@ -431,7 +458,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "send_email") {
-    const { to, subject, body, html, cc, bcc, attachments } = args as {
+    const { to, subject, body, html, cc, bcc, attachments, thread_id, in_reply_to } = args as {
       to: string;
       subject: string;
       body: string;
@@ -439,10 +466,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       cc?: string;
       bcc?: string;
       attachments?: string[];
+      thread_id?: string;
+      in_reply_to?: string;
     };
 
     try {
-      const messageId = await sendEmail(to, subject, body, html, cc, bcc, attachments);
+      const messageId = await sendEmail(to, subject, body, html, cc, bcc, attachments, thread_id, in_reply_to);
       return {
         content: [
           { type: "text", text: `Email sent successfully. Message ID: ${messageId}` },
