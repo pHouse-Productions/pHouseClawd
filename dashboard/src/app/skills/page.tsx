@@ -33,7 +33,7 @@ export default function SkillsPage() {
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Skills</h2>
-          <p className="text-zinc-500 mt-1">Vito&apos;s available skills and capabilities</p>
+          <p className="text-zinc-500 mt-1">Available skills and capabilities</p>
         </div>
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-8 text-center">
           <p className="text-zinc-500">Loading...</p>
@@ -46,7 +46,7 @@ export default function SkillsPage() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-white">Skills</h2>
-        <p className="text-zinc-500 mt-1">Vito&apos;s available skills and capabilities</p>
+        <p className="text-zinc-500 mt-1">Available skills and capabilities</p>
       </div>
 
       {skills.length === 0 ? (

@@ -91,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         <div className="w-full max-w-sm">
           <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-8">
             <h1 className="text-2xl font-bold text-white text-center mb-2">
-              Vito Dashboard
+              Assistant Dashboard
             </h1>
             <p className="text-zinc-500 text-center text-sm mb-6">
               Enter the password to continue

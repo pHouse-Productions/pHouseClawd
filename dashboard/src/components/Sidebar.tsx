@@ -60,7 +60,7 @@ export default function Sidebar() {
   return (
     <aside className="w-64 bg-zinc-900 border-r border-zinc-800 flex flex-col">
       <div className="p-6 border-b border-zinc-800">
-        <h1 className="text-xl font-bold text-white">Vito Dashboard</h1>
+        <h1 className="text-xl font-bold text-white">Assistant Dashboard</h1>
         <p className="text-sm text-zinc-500 mt-1">pHouseClawd</p>
       </div>
       <nav className="flex-1 p-4">

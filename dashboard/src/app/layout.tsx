@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Vito Dashboard",
+  title: "Assistant Dashboard",
   description: "pHouseClawd Personal AI Assistant Dashboard",
 };
 
