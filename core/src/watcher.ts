@@ -134,11 +134,18 @@ type Verbosity = "streaming" | "progress" | "final";
 
 // Message buffer for batching relay messages
 interface RelayBuffer {
-  chatId: number;
+  chatId: number | null;  // null for email
   verbosity: Verbosity;
   textBuffer: string;
   lastFlush: number;
   flushTimer: NodeJS.Timeout | null;
+  // Email-specific fields
+  email?: {
+    replyTo: string;
+    subject: string;
+    threadId?: string;
+    messageId?: string;  // Original email's Message-ID for In-Reply-To header
+  };
 }
 
 const FLUSH_INTERVAL_MS = 2000; // Batch messages every 2 seconds
@@ -159,6 +166,31 @@ async function sendToTelegram(chatId: number, message: string): Promise<void> {
     log(`[Relay] Sent to Telegram ${chatId}: ${message.slice(0, 100)}${message.length > 100 ? '...' : ''}`);
   } catch (err) {
     log(`[Relay] Failed to send to Telegram: ${err}`);
+  }
+}
+
+// Send email reply via Gmail MCP script
+async function sendEmailReply(to: string, subject: string, body: string, threadId?: string, messageId?: string): Promise<void> {
+  if (!body || !body.trim()) return;
+
+  // Ensure subject has Re: prefix
+  const replySubject = subject.startsWith("Re:") ? subject : `Re: ${subject}`;
+
+  // Build args - threadId and messageId are optional
+  const args = ["tsx", "/home/ubuntu/pHouseClawd/integrations/gmail/src/send-reply.ts", to, replySubject, body];
+  args.push(threadId || "");  // 4th arg: threadId (empty string if none)
+  args.push(messageId || ""); // 5th arg: messageId for In-Reply-To header
+
+  try {
+    const proc = spawn("npx", args, {
+      cwd: "/home/ubuntu/pHouseClawd",
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    proc.unref();
+    log(`[Relay] Sent email reply to ${to} (thread: ${threadId || 'new'}, inReplyTo: ${messageId || 'none'}): ${body.slice(0, 100)}${body.length > 100 ? '...' : ''}`);
+  } catch (err) {
+    log(`[Relay] Failed to send email reply: ${err}`);
   }
 }
 
@@ -328,7 +360,7 @@ async function handleEvent(event: Event): Promise<void> {
       break;
 
     case "gmail:email":
-      const { uid, from: emailFrom, to, subject, date, body, thread_id } = event.payload as {
+      const { uid, from: emailFrom, to, subject, date, body, thread_id, message_id } = event.payload as {
         uid: number;
         from: string;
         to: string;
@@ -336,10 +368,27 @@ async function handleEvent(event: Event): Promise<void> {
         date: string;
         body: string;
         thread_id?: string;
+        message_id?: string;
       };
 
       // Use thread_id if available, otherwise use subject as session key
       sessionKey = `email-${thread_id || subject.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 50)}`;
+
+      // Create relay buffer for email with "final" verbosity (accumulate all, send once at end)
+      relayBuffer = {
+        chatId: null,
+        verbosity: "final",
+        textBuffer: "",
+        lastFlush: Date.now(),
+        flushTimer: null,
+        email: {
+          replyTo: emailFrom,
+          subject: subject,
+          threadId: thread_id,
+          messageId: message_id,
+        },
+      };
+
       prompt = `[Email from ${emailFrom}]
 Subject: ${subject}
 Date: ${date}
@@ -433,7 +482,7 @@ ${body}`;
               relayBuffer.textBuffer += text;
             }
           }
-          if (relayBuffer && relayBuffer.verbosity === "progress" && progress) {
+          if (relayBuffer && relayBuffer.verbosity === "progress" && progress && relayBuffer.chatId) {
             sendToTelegram(relayBuffer.chatId, progress);
           }
         } catch {
@@ -460,7 +509,12 @@ ${body}`;
           relayBuffer.flushTimer = null;
         }
         if (relayBuffer.textBuffer.trim()) {
-          sendToTelegram(relayBuffer.chatId, relayBuffer.textBuffer.trim());
+          // Check if this is an email relay (send email reply) or Telegram relay
+          if (relayBuffer.email) {
+            sendEmailReply(relayBuffer.email.replyTo, relayBuffer.email.subject, relayBuffer.textBuffer.trim(), relayBuffer.email.threadId, relayBuffer.email.messageId);
+          } else if (relayBuffer.chatId) {
+            sendToTelegram(relayBuffer.chatId, relayBuffer.textBuffer.trim());
+          }
         }
       }
 

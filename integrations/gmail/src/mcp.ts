@@ -62,8 +62,8 @@ interface EmailFull {
   html?: string;
 }
 
-function getHeader(headers: { name: string; value: string }[], name: string): string {
-  const header = headers.find((h) => h.name.toLowerCase() === name.toLowerCase());
+function getHeader(headers: { name?: string | null; value?: string | null }[], name: string): string {
+  const header = headers.find((h) => h.name?.toLowerCase() === name.toLowerCase());
   return header?.value || "";
 }
 
@@ -170,13 +170,40 @@ async function fetchEmailById(id: string): Promise<EmailFull> {
   };
 }
 
+function getMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".html": "text/html",
+    ".css": "text/css",
+    ".js": "application/javascript",
+    ".json": "application/json",
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".zip": "application/zip",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".csv": "text/csv",
+  };
+  return mimeTypes[ext] || "application/octet-stream";
+}
+
 async function sendEmail(
   to: string,
   subject: string,
   body: string,
   html?: string,
   cc?: string,
-  bcc?: string
+  bcc?: string,
+  attachments?: string[]
 ): Promise<string> {
   const messageParts = [
     `To: ${to}`,
@@ -191,7 +218,52 @@ async function sendEmail(
     messageParts.splice(cc ? 2 : 1, 0, `Bcc: ${bcc}`);
   }
 
-  if (html) {
+  const hasAttachments = attachments && attachments.length > 0;
+
+  if (hasAttachments) {
+    // Use multipart/mixed for attachments
+    const mixedBoundary = "mixed_boundary_" + Date.now();
+    messageParts.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+    messageParts.push("");
+
+    // Add the body part
+    messageParts.push(`--${mixedBoundary}`);
+    if (html) {
+      const altBoundary = "alt_boundary_" + Date.now();
+      messageParts.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+      messageParts.push("");
+      messageParts.push(`--${altBoundary}`);
+      messageParts.push("Content-Type: text/plain; charset=utf-8");
+      messageParts.push("");
+      messageParts.push(body);
+      messageParts.push(`--${altBoundary}`);
+      messageParts.push("Content-Type: text/html; charset=utf-8");
+      messageParts.push("");
+      messageParts.push(html);
+      messageParts.push(`--${altBoundary}--`);
+    } else {
+      messageParts.push("Content-Type: text/plain; charset=utf-8");
+      messageParts.push("");
+      messageParts.push(body);
+    }
+
+    // Add each attachment
+    for (const filePath of attachments) {
+      const fileName = path.basename(filePath);
+      const mimeType = getMimeType(filePath);
+      const fileContent = fs.readFileSync(filePath);
+      const base64Content = fileContent.toString("base64");
+
+      messageParts.push(`--${mixedBoundary}`);
+      messageParts.push(`Content-Type: ${mimeType}; name="${fileName}"`);
+      messageParts.push("Content-Transfer-Encoding: base64");
+      messageParts.push(`Content-Disposition: attachment; filename="${fileName}"`);
+      messageParts.push("");
+      messageParts.push(base64Content);
+    }
+
+    messageParts.push(`--${mixedBoundary}--`);
+  } else if (html) {
     const boundary = "boundary_" + Date.now();
     messageParts.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
     messageParts.push("");
@@ -302,6 +374,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             description: "BCC recipient(s) - comma-separated for multiple",
           },
+          attachments: {
+            type: "array",
+            description: "Optional array of file paths to attach to the email",
+            items: {
+              type: "string",
+            },
+          },
         },
         required: ["to", "subject", "body"],
       },
@@ -352,17 +431,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "send_email") {
-    const { to, subject, body, html, cc, bcc } = args as {
+    const { to, subject, body, html, cc, bcc, attachments } = args as {
       to: string;
       subject: string;
       body: string;
       html?: string;
       cc?: string;
       bcc?: string;
+      attachments?: string[];
     };
 
     try {
-      const messageId = await sendEmail(to, subject, body, html, cc, bcc);
+      const messageId = await sendEmail(to, subject, body, html, cc, bcc, attachments);
       return {
         content: [
           { type: "text", text: `Email sent successfully. Message ID: ${messageId}` },

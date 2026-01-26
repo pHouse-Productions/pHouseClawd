@@ -37,8 +37,8 @@ function getOAuth2Client() {
 const auth = getOAuth2Client();
 const gmail = google.gmail({ version: "v1", auth });
 
-function getHeader(headers: { name: string; value: string }[], name: string): string {
-  const header = headers.find((h) => h.name.toLowerCase() === name.toLowerCase());
+function getHeader(headers: { name?: string | null; value?: string | null }[], name: string): string {
+  const header = headers.find((h) => h.name?.toLowerCase() === name.toLowerCase());
   return header?.value || "";
 }
 
@@ -161,6 +161,8 @@ async function checkForNewEmails() {
 
         const email = {
           id: messageId,
+          thread_id: detail.data.threadId,
+          message_id: getHeader(headers, "Message-ID") || getHeader(headers, "Message-Id"),
           from,
           to: getHeader(headers, "To"),
           subject: getHeader(headers, "Subject"),
