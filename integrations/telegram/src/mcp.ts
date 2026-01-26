@@ -9,6 +9,7 @@ import { getRecentMessages, saveMessage } from "./history.js";
 import { config } from "dotenv";
 import { fileURLToPath } from "url";
 import * as path from "path";
+import * as fs from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 config({ path: path.join(__dirname, "../.env") });
@@ -72,6 +73,50 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["chat_id", "text"],
       },
     },
+    {
+      name: "send_document",
+      description: "Send a file/document to a Telegram chat",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          chat_id: {
+            type: "number",
+            description: "The Telegram chat ID",
+          },
+          file_path: {
+            type: "string",
+            description: "The absolute path to the file to send",
+          },
+          caption: {
+            type: "string",
+            description: "Optional caption for the document",
+          },
+        },
+        required: ["chat_id", "file_path"],
+      },
+    },
+    {
+      name: "send_photo",
+      description: "Send a photo/image to a Telegram chat (renders inline, not as file attachment)",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          chat_id: {
+            type: "number",
+            description: "The Telegram chat ID",
+          },
+          file_path: {
+            type: "string",
+            description: "The absolute path to the image file to send",
+          },
+          caption: {
+            type: "string",
+            description: "Optional caption for the photo",
+          },
+        },
+        required: ["chat_id", "file_path"],
+      },
+    },
   ],
 }));
 
@@ -124,6 +169,60 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const errMsg = error instanceof Error ? error.message : String(error);
       return {
         content: [{ type: "text", text: `Failed to send message: ${errMsg}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (name === "send_document") {
+    const { chat_id, file_path, caption } = args as {
+      chat_id: number;
+      file_path: string;
+      caption?: string;
+    };
+
+    try {
+      const fileStream = fs.createReadStream(file_path);
+      const filename = path.basename(file_path);
+      await bot.telegram.sendDocument(
+        chat_id,
+        { source: fileStream, filename },
+        caption ? { caption } : undefined
+      );
+      return {
+        content: [{ type: "text", text: `Document sent: ${filename}` }],
+      };
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text", text: `Failed to send document: ${errMsg}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (name === "send_photo") {
+    const { chat_id, file_path, caption } = args as {
+      chat_id: number;
+      file_path: string;
+      caption?: string;
+    };
+
+    try {
+      const fileStream = fs.createReadStream(file_path);
+      await bot.telegram.sendPhoto(
+        chat_id,
+        { source: fileStream },
+        caption ? { caption } : undefined
+      );
+      const filename = path.basename(file_path);
+      return {
+        content: [{ type: "text", text: `Photo sent: ${filename}` }],
+      };
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text", text: `Failed to send photo: ${errMsg}` }],
         isError: true,
       };
     }
