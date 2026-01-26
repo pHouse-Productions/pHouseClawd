@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+dist/
+
+# Environment files (use .env.example as template)
+.env
+*.env
+!*.env.example
+
+# Personal configuration (use .example as template)
+CLAUDE.md
+config/cron.json
+
+# Gmail OAuth tokens and secrets (personal)
+integrations/gmail/tokens.json
+integrations/gmail/client_secret.json
+integrations/gmail/last_history_id.txt
+
+# Memory and logs (personal data, but keep directory structure)
+memory/**
+!memory/.gitkeep
+logs/**
+!logs/.gitkeep
+*.log
+
+# Session data
+sessions.json
+
+# Generated content (but keep directory)
+generated_images/**
+!generated_images/.gitkeep
+
+# Events (runtime data, but keep directories)
+events/pending/*.json
+!events/pending/.gitkeep
+events/processed/*.json
+!events/processed/.gitkeep
+
+# IDE and OS
+.DS_Store
+.vscode/
+.idea/
+
+# Playwright
+.playwright-mcp/
+.last_uid
