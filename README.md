@@ -2,20 +2,19 @@
 
 A personal AI assistant framework built on Claude Code. Create your own AI assistant with Telegram, Gmail, image generation, scheduled tasks, and web browsing capabilities.
 
-## Features
+## What You Get
 
-- **Telegram Integration** - Bidirectional messaging with your assistant, including photo support
+- **Telegram Bot** - Chat with your assistant from anywhere
 - **Gmail Integration** - Read and send emails through your assistant
-- **Image Generation** - Generate and edit images using Gemini (via OpenRouter)
-- **Scheduled Tasks** - Set up cron jobs for recurring tasks
+- **Image Generation** - Generate and edit images using Gemini
+- **Scheduled Tasks** - Cron jobs for recurring tasks (daily briefings, reminders, etc.)
 - **Web Browsing** - Playwright-powered web automation
-- **Persistent Memory** - Conversation history across sessions
+- **Persistent Memory** - Your assistant remembers context across sessions
 
 ## Prerequisites
 
 - Node.js 22+
-- [Claude Code CLI](https://github.com/anthropics/claude-code) installed and authenticated
-- API keys for the services you want to use
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 
 ## Quick Start
 
@@ -26,102 +25,45 @@ git clone https://github.com/vitobot87/pHouseClawd.git
 cd pHouseClawd
 ```
 
-### 2. Install dependencies
+### 2. Run Claude Code
 
 ```bash
-# Core
-cd core && npm install && cd ..
-
-# Integrations
-cd integrations/telegram && npm install && cd ../..
-cd integrations/gmail && npm install && cd ../..
-cd integrations/image-gen && npm install && cd ../..
-cd integrations/cron && npm install && cd ../..
+claude
 ```
 
-### 3. Configure your assistant
+### 3. Tell Claude what you want
 
-Copy the example files and customize them:
+Just describe what you're trying to do:
 
-```bash
-# Assistant personality and instructions
-cp CLAUDE.example.md CLAUDE.md
+> "Hey, I want to set up a personal assistant. My name is [name], my email is [email]. I want to use Telegram and Gmail."
 
-# Telegram
-cp integrations/telegram/.env.example integrations/telegram/.env
+Claude will:
+- Walk you through getting API keys and credentials
+- Install dependencies
+- Create your personalized `CLAUDE.md` configuration
+- Set up MCP servers for your integrations
+- Create necessary directories
+- Get everything running
 
-# Image generation
-cp integrations/image-gen/.env.example integrations/image-gen/.env
+## What Claude Will Help You Set Up
 
-# Cron jobs
-cp config/cron.example.json config/cron.json
-```
+**Telegram Bot:**
+- Create a bot via @BotFather
+- Configure your bot token and chat ID
+- Start the Telegram daemon
 
-### 4. Set up Telegram
+**Gmail (optional):**
+- Set up Google Cloud OAuth credentials
+- Run the authentication flow
+- Configure the Gmail MCP server
 
-1. Message [@BotFather](https://t.me/BotFather) on Telegram
-2. Create a new bot with `/newbot`
-3. Copy the bot token to `integrations/telegram/.env`
-4. Message your bot to get your chat ID (or use [@userinfobot](https://t.me/userinfobot))
-5. Add your chat ID to `CLAUDE.md`
+**Image Generation (optional):**
+- Get an OpenRouter API key
+- Configure the image generation MCP server
 
-### 5. Set up Gmail (optional)
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project
-3. Enable the Gmail API
-4. Create OAuth 2.0 credentials (Desktop app)
-5. Download the credentials and save as `integrations/gmail/client_secret.json`
-6. Run the auth flow: `cd integrations/gmail && npx tsx src/auth.ts`
-
-### 6. Set up Image Generation (optional)
-
-1. Get an API key from [OpenRouter](https://openrouter.ai/keys)
-2. Add it to `integrations/image-gen/.env`
-
-### 7. Register MCP servers
-
-```bash
-# Telegram
-claude mcp add telegram -s user -- npx tsx /path/to/pHouseClawd/integrations/telegram/src/mcp.ts
-
-# Gmail
-claude mcp add gmail -s user -- npx tsx /path/to/pHouseClawd/integrations/gmail/src/mcp.ts
-
-# Image generation
-claude mcp add image-gen -s user -- npx --prefix /path/to/pHouseClawd/integrations/image-gen tsx /path/to/pHouseClawd/integrations/image-gen/src/mcp.ts
-
-# Cron jobs
-claude mcp add cron -s user -- npx --prefix /path/to/pHouseClawd/integrations/cron tsx /path/to/pHouseClawd/integrations/cron/src/mcp.ts
-
-# Playwright (web browsing)
-claude mcp add playwright -s user -- npx @playwright/mcp --headless
-```
-
-### 8. Create required directories
-
-```bash
-mkdir -p memory/telegram/images
-mkdir -p logs
-mkdir -p events/pending events/processed
-mkdir -p generated_images
-```
-
-### 9. Start the watcher
-
-The watcher monitors for incoming messages and scheduled tasks:
-
-```bash
-cd core && npx tsx src/watcher.ts
-```
-
-### 10. Start the Telegram daemon
-
-In a separate terminal:
-
-```bash
-cd integrations/telegram && npx tsx src/daemon.ts
-```
+**Scheduled Tasks:**
+- Set up cron jobs for recurring tasks
+- Morning briefings, reminders, whatever you want
 
 ## Project Structure
 
@@ -140,51 +82,41 @@ pHouseClawd/
 │   ├── image-gen/         # Image generation (Gemini)
 │   └── cron/              # Cron job management
 ├── memory/                # Conversation history (gitignored)
-├── logs/                  # Application logs (gitignored)
-└── generated_images/      # Generated images (gitignored)
+├── notes/                 # Your assistant's notes (gitignored)
+└── logs/                  # Application logs (gitignored)
 ```
 
 ## Customization
 
-### Personality
-
-Edit `CLAUDE.md` to customize your assistant's:
+Your assistant's personality lives in `CLAUDE.md`. Edit it to customize:
 - Name and identity
-- Communication style
-- Your personal information
-- Any important context
+- Communication style (formal, casual, funny, whatever)
+- Your personal info and preferences
+- Important context about your life/work
 
-### Scheduled Tasks
+See `CLAUDE.example.md` for a template.
 
-Use the cron MCP tools or edit `config/cron.json` directly:
+## Running Your Assistant
 
-```json
-{
-  "jobs": [
-    {
-      "id": "morning-briefing",
-      "enabled": true,
-      "schedule": "daily at 9am",
-      "description": "Morning email summary",
-      "prompt": "Check my emails and send me a summary on Telegram."
-    }
-  ]
-}
+Once set up, you'll run two processes:
+
+**Terminal 1 - The Watcher** (processes incoming messages and tasks):
+```bash
+cd core && npx tsx src/watcher.ts
 ```
 
-Schedule formats:
-- Human-readable: `every hour`, `every 30 minutes`, `daily at 9am`, `weekly`
-- Cron syntax: `0 9 * * *` (9am daily), `*/30 * * * *` (every 30 min)
+**Terminal 2 - Telegram Daemon** (receives Telegram messages):
+```bash
+cd integrations/telegram && npx tsx src/daemon.ts
+```
 
 ## Updating
-
-To pull updates without losing your personal configuration:
 
 ```bash
 git pull origin main
 ```
 
-Your personal files (CLAUDE.md, .env files, memory/, logs/) are gitignored and won't be affected.
+Your personal files (`CLAUDE.md`, `.env` files, `memory/`, `notes/`) are gitignored and won't be affected.
 
 ## License
 
