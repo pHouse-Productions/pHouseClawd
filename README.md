@@ -21,7 +21,7 @@ A personal AI assistant framework built on Claude Code. Create your own AI assis
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/vitobot87/pHouseClawd.git
+git clone https://github.com/pHouse-Productions/pHouseClawd.git
 cd pHouseClawd
 ```
 
