@@ -118,6 +118,10 @@ Once set up, just run:
 
 This starts all the background processes (watcher, Telegram daemon, etc.) in screen sessions. Run it anytime you need to restart everything.
 
+## Dashboard
+
+Your assistant comes with a web dashboard at `http://your-server:3000`. Claude will generate a password during setup - it'll tell you what it is.
+
 ## Updating
 
 ```bash
