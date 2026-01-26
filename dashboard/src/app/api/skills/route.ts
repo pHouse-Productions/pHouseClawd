@@ -1,6 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
 
+function getProjectRoot(): string {
+  return path.resolve(process.cwd(), "..");
+}
+
 interface SkillInfo {
   name: string;
   description: string;
@@ -11,7 +15,7 @@ interface SkillInfo {
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const skillsDir = "/home/ubuntu/pHouseClawd/.claude/skills";
+  const skillsDir = path.join(getProjectRoot(), ".claude/skills");
   const skills: SkillInfo[] = [];
 
   try {

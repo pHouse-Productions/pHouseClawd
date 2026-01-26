@@ -1,6 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
 
+function getProjectRoot(): string {
+  return path.resolve(process.cwd(), "..");
+}
+
 interface CronJob {
   id: string;
   schedule: string;
@@ -17,7 +21,7 @@ interface CronConfig {
 }
 
 async function getCronJobs(): Promise<CronJob[]> {
-  const cronPath = "/home/ubuntu/pHouseClawd/config/cron.json";
+  const cronPath = path.join(getProjectRoot(), "config/cron.json");
   try {
     const content = await fs.readFile(cronPath, "utf-8");
     const config: CronConfig = JSON.parse(content);

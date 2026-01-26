@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 
+function getProjectRoot(): string {
+  return path.resolve(process.cwd(), "..");
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const filePath = searchParams.get("path");
@@ -11,7 +15,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Security: ensure path is within memory directory
-  const memoryDir = "/home/ubuntu/pHouseClawd/memory";
+  const memoryDir = path.join(getProjectRoot(), "memory");
   const resolvedPath = path.resolve(filePath);
 
   if (!resolvedPath.startsWith(memoryDir)) {

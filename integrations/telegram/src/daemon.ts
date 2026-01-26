@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import "dotenv/config";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 
@@ -208,7 +209,7 @@ async function askClaude(prompt: string): Promise<string> {
     const args = ["-p", "--dangerously-skip-permissions", prompt];
 
     const proc = spawn("claude", args, {
-      cwd: "/home/ubuntu/pHouseClawd",
+      cwd: PROJECT_ROOT,
       env: { ...process.env },
     });
 

@@ -1,8 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import { randomUUID } from "crypto";
+import { fileURLToPath } from "url";
 
-const EVENTS_DIR = "/home/ubuntu/pHouseClawd/events";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, "../..");
+const EVENTS_DIR = path.join(PROJECT_ROOT, "events");
 const PENDING_DIR = path.join(EVENTS_DIR, "pending");
 const PROCESSED_DIR = path.join(EVENTS_DIR, "processed");
 

@@ -4,10 +4,11 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 const CREDENTIALS_PATH = path.join(__dirname, "../client_secret.json");
 const TOKEN_PATH = path.join(__dirname, "../tokens.json");
 const STATE_PATH = path.join(__dirname, "../last_history_id.txt");
-const EVENTS_DIR = "/home/ubuntu/pHouseClawd/events/pending";
+const EVENTS_DIR = path.join(PROJECT_ROOT, "events/pending");
 
 const POLL_INTERVAL = 60000; // Check every 60 seconds
 

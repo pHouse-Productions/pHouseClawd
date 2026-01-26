@@ -7,8 +7,12 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import { randomUUID } from "crypto";
+import { fileURLToPath } from "url";
 
-const CRON_CONFIG_FILE = "/home/ubuntu/pHouseClawd/config/cron.json";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, "../../..");
+const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
 
 // Cron job interface
 interface CronJob {

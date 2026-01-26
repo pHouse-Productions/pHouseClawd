@@ -55,8 +55,13 @@ function formatBytes(bytes: number): string {
   return `${gb.toFixed(1)} GB`;
 }
 
+function getProjectRoot(): string {
+  // Dashboard lives in PROJECT_ROOT/dashboard
+  return path.resolve(process.cwd(), "..");
+}
+
 async function getRecentActivity() {
-  const baseDir = "/home/ubuntu/pHouseClawd";
+  const baseDir = getProjectRoot();
   const activities: { type: string; message: string; time: string }[] = [];
 
   // Check for recent telegram images

@@ -2,8 +2,13 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { spawn } from "child_process";
+import { fileURLToPath } from "url";
 import cron from "node-cron";
 import { getPendingEvents, markProcessed, Event, pushEvent } from "./events.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, "../..");
 
 // Generate a deterministic UUID v5 from a namespace + name
 const NAMESPACE_UUID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"; // DNS namespace
@@ -24,13 +29,13 @@ function generateSessionId(name: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
-const PENDING_DIR = "/home/ubuntu/pHouseClawd/events/pending";
-const SEND_SCRIPT = "/home/ubuntu/pHouseClawd/integrations/telegram/src/send.ts";
-const LOGS_DIR = "/home/ubuntu/pHouseClawd/logs";
+const PENDING_DIR = path.join(PROJECT_ROOT, "events/pending");
+const SEND_SCRIPT = path.join(PROJECT_ROOT, "integrations/telegram/src/send.ts");
+const LOGS_DIR = path.join(PROJECT_ROOT, "logs");
 const LOG_FILE = path.join(LOGS_DIR, "watcher.log");  // Watcher operational logs
 const STREAM_LOG = path.join(LOGS_DIR, "claude-stream.jsonl");  // Raw Claude stream events
 const SESSIONS_FILE = path.join(LOGS_DIR, "sessions.json");
-const CRON_CONFIG_FILE = "/home/ubuntu/pHouseClawd/config/cron.json";
+const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
 const POLL_INTERVAL = 1000; // Check every second
 
 // Cron job interface
@@ -158,7 +163,7 @@ async function sendToTelegram(chatId: number, message: string): Promise<void> {
 
   try {
     const proc = spawn("npx", ["tsx", SEND_SCRIPT, String(chatId), message], {
-      cwd: "/home/ubuntu/pHouseClawd",
+      cwd: PROJECT_ROOT,
       stdio: ["ignore", "ignore", "ignore"],
       detached: true,
     });
@@ -177,13 +182,13 @@ async function sendEmailReply(to: string, subject: string, body: string, threadI
   const replySubject = subject.startsWith("Re:") ? subject : `Re: ${subject}`;
 
   // Build args - threadId and messageId are optional
-  const args = ["tsx", "/home/ubuntu/pHouseClawd/integrations/gmail/src/send-reply.ts", to, replySubject, body];
+  const args = ["tsx", path.join(PROJECT_ROOT, "integrations/gmail/src/send-reply.ts"), to, replySubject, body];
   args.push(threadId || "");  // 4th arg: threadId (empty string if none)
   args.push(messageId || ""); // 5th arg: messageId for In-Reply-To header
 
   try {
     const proc = spawn("npx", args, {
-      cwd: "/home/ubuntu/pHouseClawd",
+      cwd: PROJECT_ROOT,
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
@@ -312,9 +317,9 @@ async function handleEvent(event: Event): Promise<void> {
         clearSession(sessionKey);
         log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
         // Send confirmation and return early - no need to invoke Claude
-        const sendScript = "/home/ubuntu/pHouseClawd/integrations/telegram/src/send.ts";
+        const sendScript = path.join(PROJECT_ROOT, "integrations/telegram/src/send.ts");
         spawn("npx", ["tsx", sendScript, String(chat_id), "Fresh start, boss. New session is ready."], {
-          cwd: "/home/ubuntu/pHouseClawd",
+          cwd: PROJECT_ROOT,
           stdio: ["ignore", "ignore", "ignore"],
           detached: true,
         }).unref();
@@ -324,15 +329,15 @@ async function handleEvent(event: Event): Promise<void> {
       // Handle /restart command
       if (text.trim().toLowerCase() === "/restart") {
         log(`[Watcher] Restart requested via /restart command`);
-        const sendScript = "/home/ubuntu/pHouseClawd/integrations/telegram/src/send.ts";
+        const sendScript = path.join(PROJECT_ROOT, "integrations/telegram/src/send.ts");
         spawn("npx", ["tsx", sendScript, String(chat_id), "Restarting... Back in a few seconds."], {
-          cwd: "/home/ubuntu/pHouseClawd",
+          cwd: PROJECT_ROOT,
           stdio: ["ignore", "ignore", "ignore"],
           detached: true,
         }).unref();
         // Trigger restart script in background (detached so it survives our death)
-        spawn("/home/ubuntu/pHouseClawd/restart.sh", [], {
-          cwd: "/home/ubuntu/pHouseClawd",
+        spawn(path.join(PROJECT_ROOT, "restart.sh"), [], {
+          cwd: PROJECT_ROOT,
           stdio: ["ignore", "ignore", "ignore"],
           detached: true,
         }).unref();
@@ -445,7 +450,7 @@ ${body}`;
         prompt
       ],
       {
-        cwd: "/home/ubuntu/pHouseClawd",
+        cwd: PROJECT_ROOT,
         env: { ...process.env, FORCE_COLOR: "0" },
         stdio: ["ignore", "pipe", "pipe"],
       }

@@ -8,8 +8,12 @@
 import { chromium } from "playwright";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
-const LEADS_DIR = "/home/ubuntu/pHouseClawd/leads";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, "..");
+const LEADS_DIR = path.join(PROJECT_ROOT, "leads");
 
 function markdownToHtml(markdown: string): string {
   // Basic markdown to HTML conversion

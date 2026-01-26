@@ -2,6 +2,10 @@ import { promises as fs } from "fs";
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 
+function getProjectRoot(): string {
+  return path.resolve(process.cwd(), "..");
+}
+
 interface LogFile {
   name: string;
   path: string;
@@ -9,7 +13,7 @@ interface LogFile {
   modified: string;
 }
 
-const LOGS_DIR = "/home/ubuntu/pHouseClawd/logs";
+const LOGS_DIR = path.join(getProjectRoot(), "logs");
 
 async function getLogFiles(): Promise<LogFile[]> {
   const files: LogFile[] = [];

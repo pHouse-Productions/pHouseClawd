@@ -8,10 +8,11 @@ import * as fs from "fs";
 import * as https from "https";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 config({ path: path.join(__dirname, "../.env") });
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
-const IMAGES_DIR = "/home/ubuntu/pHouseClawd/memory/telegram/images";
+const IMAGES_DIR = path.join(PROJECT_ROOT, "memory/telegram/images");
 
 // Ensure images directory exists
 if (!fs.existsSync(IMAGES_DIR)) {

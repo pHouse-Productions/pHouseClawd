@@ -3,7 +3,7 @@
 # Start the pHouseClawd system
 # Runs Telegram listener, Gmail watcher, and event watcher
 
-cd /home/ubuntu/pHouseClawd
+cd "$(dirname "$0")"
 
 echo "Starting pHouseClawd..."
 

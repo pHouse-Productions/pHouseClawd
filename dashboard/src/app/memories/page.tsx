@@ -1,6 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
 
+function getProjectRoot(): string {
+  return path.resolve(process.cwd(), "..");
+}
+
 interface MemoryFile {
   name: string;
   path: string;
@@ -10,7 +14,7 @@ interface MemoryFile {
 }
 
 async function getMemoryFiles(): Promise<{ category: string; files: MemoryFile[] }[]> {
-  const baseDir = "/home/ubuntu/pHouseClawd/memory";
+  const baseDir = path.join(getProjectRoot(), "memory");
   const categories: { category: string; files: MemoryFile[] }[] = [];
 
   async function scanDir(dir: string, category: string) {

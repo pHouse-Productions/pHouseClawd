@@ -4,12 +4,15 @@
 # This script is designed to be called by the assistant to restart itself
 # It waits a moment before killing processes to allow the current response to complete
 
+# Get the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo "Restart requested. Waiting 3 seconds..."
 sleep 3
 
 # Use kill.sh to stop everything
 echo "Stopping pHouseClawd..."
-/home/ubuntu/pHouseClawd/kill.sh
+"$SCRIPT_DIR/kill.sh"
 
 sleep 1
 
@@ -19,7 +22,7 @@ if tmux has-session -t phouse 2>/dev/null; then
   tmux send-keys -t phouse "./start.sh" Enter
 else
   echo "Starting pHouseClawd..."
-  cd /home/ubuntu/pHouseClawd
+  cd "$SCRIPT_DIR"
   nohup ./start.sh > /dev/null 2>&1 &
 fi
 

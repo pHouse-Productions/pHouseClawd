@@ -1,8 +1,13 @@
 import { promises as fs } from "fs";
+import path from "path";
+
+function getProjectRoot(): string {
+  return path.resolve(process.cwd(), "..");
+}
 
 async function getClaudeMd(): Promise<string> {
   try {
-    return await fs.readFile("/home/ubuntu/pHouseClawd/CLAUDE.md", "utf-8");
+    return await fs.readFile(path.join(getProjectRoot(), "CLAUDE.md"), "utf-8");
   } catch {
     return "CLAUDE.md not found";
   }
@@ -32,7 +37,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ConfigPage() {
   const claudeMd = await getClaudeMd();
-  const modified = await getFileModified("/home/ubuntu/pHouseClawd/CLAUDE.md");
+  const modified = await getFileModified(path.join(getProjectRoot(), "CLAUDE.md"));
 
   return (
     <div className="space-y-6">

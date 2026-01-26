@@ -1,7 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
-const HISTORY_DIR = "/home/ubuntu/pHouseClawd/memory/telegram";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, "../../..");
+const HISTORY_DIR = path.join(PROJECT_ROOT, "memory/telegram");
 
 export interface Message {
   role: "user" | "assistant";
