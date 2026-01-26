@@ -110,17 +110,13 @@ See `CLAUDE.example.md` for a template.
 
 ## Running Your Assistant
 
-Once set up, you'll run two processes:
+Once set up, just run:
 
-**Terminal 1 - The Watcher** (processes incoming messages and tasks):
 ```bash
-cd core && npx tsx src/watcher.ts
+./restart.sh
 ```
 
-**Terminal 2 - Telegram Daemon** (receives Telegram messages):
-```bash
-cd integrations/telegram && npx tsx src/daemon.ts
-```
+This starts all the background processes (watcher, Telegram daemon, etc.) in screen sessions. Run it anytime you need to restart everything.
 
 ## Updating
 
