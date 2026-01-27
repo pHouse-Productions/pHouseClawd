@@ -30,7 +30,7 @@ function generateSessionId(name: string): string {
 }
 
 const PENDING_DIR = path.join(PROJECT_ROOT, "events/pending");
-const SEND_SCRIPT = path.join(PROJECT_ROOT, "integrations/telegram/src/send.ts");
+const SEND_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
 const LOGS_DIR = path.join(PROJECT_ROOT, "logs");
 const LOG_FILE = path.join(LOGS_DIR, "watcher.log");  // Watcher operational logs
 const STREAM_LOG = path.join(LOGS_DIR, "claude-stream.jsonl");  // Raw Claude stream events
@@ -206,7 +206,7 @@ async function sendEmailReply(to: string, subject: string, body: string, threadI
   const replySubject = subject.startsWith("Re:") ? subject : `Re: ${subject}`;
 
   // Build args - threadId and messageId are optional
-  const args = ["tsx", path.join(PROJECT_ROOT, "integrations/gmail/src/send-reply.ts"), to, replySubject, body];
+  const args = ["tsx", path.join(PROJECT_ROOT, "listeners/gmail/send-reply.ts"), to, replySubject, body];
   args.push(threadId || "");  // 4th arg: threadId (empty string if none)
   args.push(messageId || ""); // 5th arg: messageId for In-Reply-To header
 
@@ -341,7 +341,7 @@ async function handleEvent(event: Event): Promise<void> {
         clearSession(sessionKey);
         log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
         // Send confirmation and return early - no need to invoke Claude
-        const sendScript = path.join(PROJECT_ROOT, "integrations/telegram/src/send.ts");
+        const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
         spawn("npx", ["tsx", sendScript, String(chat_id), "Fresh start, boss. New session is ready."], {
           cwd: PROJECT_ROOT,
           stdio: ["ignore", "ignore", "ignore"],
@@ -353,7 +353,7 @@ async function handleEvent(event: Event): Promise<void> {
       // Handle /restart command
       if (text.trim().toLowerCase() === "/restart") {
         log(`[Watcher] Restart requested via /restart command`);
-        const sendScript = path.join(PROJECT_ROOT, "integrations/telegram/src/send.ts");
+        const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
         spawn("npx", ["tsx", sendScript, String(chat_id), "Restarting... Back in a few seconds."], {
           cwd: PROJECT_ROOT,
           stdio: ["ignore", "ignore", "ignore"],
