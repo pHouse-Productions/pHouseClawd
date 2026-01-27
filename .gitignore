@@ -49,8 +49,8 @@ events/processed/*.json
 .playwright-mcp/
 .last_uid
 
-# Personal notes
-notes/
+# Personal notes (root level only, not dashboard/src/app/notes)
+/notes/
 
 # Sales leads (personal business data)
 leads/
