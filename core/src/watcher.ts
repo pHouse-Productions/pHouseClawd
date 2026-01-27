@@ -285,6 +285,7 @@ Be selective - not everything needs to be saved. Focus on information that would
       "claude",
       [
         "-p",
+        "--verbose",
         "--output-format", "stream-json",
         "--dangerously-skip-permissions",
         rollupPrompt
