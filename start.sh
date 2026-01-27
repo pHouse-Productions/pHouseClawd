@@ -22,12 +22,12 @@ trap cleanup SIGINT SIGTERM EXIT
 
 # Start Telegram listener
 echo "Starting Telegram listener..."
-npx tsx integrations/telegram/src/receive.ts daemon &
+npx tsx listeners/telegram/receive.ts daemon &
 TELEGRAM_PID=$!
 
 # Start Gmail watcher
 echo "Starting Gmail watcher..."
-npx tsx integrations/gmail/src/receive.ts &
+npx tsx listeners/gmail/receive.ts &
 GMAIL_PID=$!
 
 # Give them a moment to connect

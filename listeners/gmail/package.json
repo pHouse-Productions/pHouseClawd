@@ -1,0 +1,7 @@
+{
+  "name": "gmail-listener",
+  "type": "module",
+  "dependencies": {
+    "googleapis": "^146.0.0"
+  }
+}
