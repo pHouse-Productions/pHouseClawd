@@ -1,12 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import MarkdownRenderer from "../../components/MarkdownRenderer";
 
-// Resolve project root relative to this file (dashboard/src/app/memory/page.tsx -> project root)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = process.env.PHOUSE_PROJECT_ROOT || path.resolve(__dirname, "../../../../..");
+// Project root - process.cwd() returns the dashboard directory when running Next.js
+// So we go up one level to get to pHouseClawd root
+const PROJECT_ROOT = process.env.PHOUSE_PROJECT_ROOT || path.resolve(process.cwd(), "..");
 
 const LONG_TERM_DIR = path.join(PROJECT_ROOT, "memory/long-term");
 const SHORT_TERM_FILE = path.join(PROJECT_ROOT, "memory/short-term/buffer.txt");
