@@ -10,8 +10,8 @@ interface NoteFile {
 }
 
 async function getNotes(): Promise<NoteFile[]> {
-  // Memory MCP stores notes in pHouseMcp/notes
-  const notesDir = "/home/ubuntu/pHouseMcp/notes";
+  // Configurable via PHOUSE_NOTES_DIR env var, defaults to pHouseMcp/notes
+  const notesDir = process.env.PHOUSE_NOTES_DIR || "/home/ubuntu/pHouseMcp/notes";
   const notes: NoteFile[] = [];
 
   try {
