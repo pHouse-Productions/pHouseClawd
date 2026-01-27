@@ -40,10 +40,15 @@ async function getLogFiles(): Promise<LogFile[]> {
   return files.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
 }
 
-async function getLogContent(filePath: string): Promise<string[]> {
+async function getLogContent(filePath: string, lines?: number): Promise<string[]> {
   try {
     const content = await fs.readFile(filePath, "utf-8");
-    return content.split("\n").filter((l) => l.trim());
+    const allLines = content.split("\n").filter((l) => l.trim());
+    // If lines param provided, return only the last N lines
+    if (lines && lines > 0) {
+      return allLines.slice(-lines);
+    }
+    return allLines;
   } catch {
     return [];
   }
@@ -52,20 +57,22 @@ async function getLogContent(filePath: string): Promise<string[]> {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const fileName = searchParams.get("file");
+  const linesParam = searchParams.get("lines");
+  const lines = linesParam ? parseInt(linesParam, 10) : 100; // Default to last 100 lines
 
   const logFiles = await getLogFiles();
 
   if (fileName) {
     const file = logFiles.find((f) => f.name === fileName);
     if (file) {
-      const content = await getLogContent(file.path);
+      const content = await getLogContent(file.path, lines);
       return NextResponse.json({ files: logFiles, content, selectedFile: file.name });
     }
   }
 
   // Return first file's content by default
   if (logFiles.length > 0) {
-    const content = await getLogContent(logFiles[0].path);
+    const content = await getLogContent(logFiles[0].path, lines);
     return NextResponse.json({ files: logFiles, content, selectedFile: logFiles[0].name });
   }
 

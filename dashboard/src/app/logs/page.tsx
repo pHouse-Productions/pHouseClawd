@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { authFetch } from "@/lib/auth";
 
 interface LogFile {
@@ -135,28 +136,50 @@ function JsonLogEntry({ line, index }: { line: string; index: number }) {
   }
 }
 
+const LINE_OPTIONS = [50, 100, 250, 500, 1000];
+
 export default function LogsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [data, setData] = useState<LogData | null>(null);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [loading, setLoading] = useState(true);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
-  const fetchLogs = useCallback(async (file?: string) => {
+  // Get file and lines from URL params
+  const selectedFile = searchParams.get("file");
+  const lines = parseInt(searchParams.get("lines") || "100", 10);
+
+  const updateParams = useCallback((updates: { file?: string; lines?: number }) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (updates.file !== undefined) {
+      params.set("file", updates.file);
+    }
+    if (updates.lines !== undefined) {
+      params.set("lines", updates.lines.toString());
+    }
+    router.push(`/logs?${params.toString()}`);
+  }, [router, searchParams]);
+
+  const fetchLogs = useCallback(async (file?: string | null, lineCount?: number) => {
     try {
-      const url = file ? `/api/logs?file=${encodeURIComponent(file)}` : "/api/logs";
+      const params = new URLSearchParams();
+      if (file) params.set("file", file);
+      params.set("lines", (lineCount || lines).toString());
+      const url = `/api/logs?${params.toString()}`;
       const res = await authFetch(url);
       const newData: LogData = await res.json();
       setData(newData);
+      // If no file was in URL but API returned one, update URL
       if (!selectedFile && newData.selectedFile) {
-        setSelectedFile(newData.selectedFile);
+        updateParams({ file: newData.selectedFile });
       }
     } catch (err) {
       console.error("Failed to fetch logs:", err);
     } finally {
       setLoading(false);
     }
-  }, [selectedFile]);
+  }, [lines, selectedFile, updateParams]);
 
   // Scroll to bottom when content changes or on initial load
   useEffect(() => {
@@ -170,29 +193,32 @@ export default function LogsPage() {
     }
   }, [data?.content, loading]);
 
-  // Initial load
+  // Initial load and when params change
   useEffect(() => {
-    fetchLogs();
-  }, []);
+    setLoading(true);
+    fetchLogs(selectedFile, lines);
+  }, [selectedFile, lines]);
 
   // Auto-refresh
   useEffect(() => {
     if (!autoRefresh) return;
     const interval = setInterval(() => {
-      fetchLogs(selectedFile || undefined);
+      fetchLogs(selectedFile, lines);
     }, 5000);
     return () => clearInterval(interval);
-  }, [autoRefresh, selectedFile, fetchLogs]);
+  }, [autoRefresh, selectedFile, lines, fetchLogs]);
 
   const handleFileSelect = (fileName: string) => {
-    setSelectedFile(fileName);
-    setLoading(true);
-    fetchLogs(fileName);
+    updateParams({ file: fileName });
+  };
+
+  const handleLinesChange = (newLines: number) => {
+    updateParams({ lines: newLines });
   };
 
   const handleRefresh = () => {
     setLoading(true);
-    fetchLogs(selectedFile || undefined);
+    fetchLogs(selectedFile, lines);
   };
 
   if (loading && !data) {
@@ -211,7 +237,7 @@ export default function LogsPage() {
 
   const logFiles = data?.files || [];
   const logContent = data?.content || [];
-  const currentFile = selectedFile || data?.selectedFile;
+  const currentFile = selectedFile || data?.selectedFile || null;
 
   return (
     <div className="space-y-6">
@@ -262,6 +288,18 @@ export default function LogsPage() {
                   </span>
                 </div>
                 <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-400">Lines:</span>
+                    <select
+                      value={lines}
+                      onChange={(e) => handleLinesChange(parseInt(e.target.value, 10))}
+                      className="px-2 py-1 text-sm bg-zinc-800 border border-zinc-700 text-white rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      {LINE_OPTIONS.map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
                   <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer">
                     <input
                       type="checkbox"
