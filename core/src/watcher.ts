@@ -511,7 +511,7 @@ async function handleChannelEvent(
 
       // Log outgoing response to short-term memory
       if (outgoingTextBuffer.trim()) {
-        logToShortTermMemory(channel.name, "out", `Vito: ${outgoingTextBuffer.trim()}`);
+        logToShortTermMemory(channel.name, "out", `Assistant: ${outgoingTextBuffer.trim()}`);
         checkShortTermMemorySize();
       }
 

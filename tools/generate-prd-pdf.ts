@@ -228,7 +228,7 @@ async function generatePDF(slug: string): Promise<string> {
   </div>
 
   <div class="footer">
-    Prepared by Vito AI Assistant | ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+    Prepared by AI Assistant | ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
   </div>
 </body>
 </html>
