@@ -147,7 +147,25 @@ git clone https://github.com/mcarcaso/pHouseMcp.git
    }
    ```
 
-   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `image-gen`, `yahoo-finance`, `cron`, `memory`
+   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `google-calendar`, `image-gen`, `yahoo-finance`, `cron`, `memory`, `pdf`
+
+### Recommended Third-Party MCP
+
+For web browsing and automation, we recommend the **Playwright MCP**:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@playwright/mcp", "--headless"]
+    }
+  }
+}
+```
+
+This gives your assistant the ability to browse websites, take screenshots, fill forms, and automate web tasks. It's well-maintained and works great out of the box.
 
 4. **For Google services**, you'll need OAuth credentials:
    - Create a project in Google Cloud Console

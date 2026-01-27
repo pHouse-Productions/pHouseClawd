@@ -1,0 +1,13 @@
+{
+  "channels": {
+    "telegram": {
+      "enabled": true
+    },
+    "email": {
+      "enabled": true
+    },
+    "gchat": {
+      "enabled": false
+    }
+  }
+}

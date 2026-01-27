@@ -48,6 +48,9 @@ const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
 // Email security config
 const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-security.json");
 
+// Channel config
+const CHANNELS_CONFIG_FILE = path.join(PROJECT_ROOT, "config/channels.json");
+
 interface EmailSecurityConfig {
   trustedEmailAddresses: string[];
   alertTelegramChatId: number | null;
@@ -68,6 +71,33 @@ function loadEmailSecurityConfig(): EmailSecurityConfig {
     log(`[Security] Failed to load email security config: ${err}`);
   }
   return { trustedEmailAddresses: [], alertTelegramChatId: null, forwardUntrustedTo: null };
+}
+
+// Channel config types
+interface ChannelConfig {
+  enabled: boolean;
+}
+
+interface ChannelsConfig {
+  channels: Record<string, ChannelConfig>;
+}
+
+function loadChannelsConfig(): ChannelsConfig {
+  try {
+    if (fs.existsSync(CHANNELS_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CHANNELS_CONFIG_FILE, "utf-8"));
+    }
+  } catch (err) {
+    log(`[Channels] Failed to load channels config: ${err}`);
+  }
+  // Default: all channels enabled if no config exists
+  return {
+    channels: {
+      telegram: { enabled: true },
+      email: { enabled: true },
+      gchat: { enabled: true },
+    }
+  };
 }
 
 // Cron job interface
@@ -671,16 +701,29 @@ function scheduleCronJobs(): void {
 async function watch(): Promise<void> {
   log("[Watcher] Starting unified watcher...");
 
-  // List of channels to start
-  const channels: ChannelDefinition[] = [
+  // Load channel config
+  const channelsConfig = loadChannelsConfig();
+
+  // All available channels
+  const allChannels: ChannelDefinition[] = [
     TelegramChannel,
     EmailChannel,
     GChatChannel,
   ];
 
+  // Filter to only enabled channels
+  const channels = allChannels.filter(channel => {
+    const config = channelsConfig.channels[channel.name];
+    const enabled = config?.enabled !== false; // Default to enabled if not specified
+    if (!enabled) {
+      log(`[Watcher] Skipping ${channel.name} (disabled in config)`);
+    }
+    return enabled;
+  });
+
   const stopFunctions: (() => void)[] = [];
 
-  // Start all channel listeners
+  // Start enabled channel listeners
   for (const channel of channels) {
     try {
       log(`[Watcher] Starting ${channel.name} listener...`);
