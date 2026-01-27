@@ -655,13 +655,14 @@ ${body}`;
       process.stderr.write(chunk);
     });
 
-    proc.on("close", (code) => {
+    proc.on("close", async (code) => {
       log(`[Watcher] Claude exited with code ${code}`);
 
-      // Stop typing indicator
+      // Stop typing indicator and wait a moment for any in-flight typing request to complete
       if (typingInterval) {
         clearInterval(typingInterval);
         typingInterval = null;
+        await new Promise(r => setTimeout(r, 100));
       }
 
       // Flush any remaining buffered text
