@@ -100,8 +100,10 @@ pHouseClawd/
 │   ├── gmail/             # Gmail inbox watcher daemon
 │   └── gchat/             # Google Chat listener
 ├── dashboard/             # Web UI (Next.js)
-├── memory/                # Conversation history (gitignored)
-├── notes/                 # Your assistant's notes (gitignored)
+├── memory/
+│   ├── short-term/        # Conversation buffer (auto-logged, gitignored)
+│   └── long-term/         # Persistent memories (gitignored)
+├── leads/                 # Business leads tracker (gitignored)
 └── logs/                  # Application logs (gitignored)
 ```
 
@@ -353,7 +355,7 @@ Your assistant comes with a web dashboard at `http://your-server:3000`. Claude w
 git pull origin main
 ```
 
-Your personal files (`CLAUDE.md`, `config/*.json`, `memory/`, `notes/`) are gitignored and won't be affected.
+Your personal files (`CLAUDE.md`, `config/*.json`, `memory/`, `leads/`) are gitignored and won't be affected.
 
 ## License
 

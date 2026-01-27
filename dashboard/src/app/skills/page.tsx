@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { authFetch } from "@/lib/auth";
-import MarkdownRenderer from "../notes/MarkdownRenderer";
+import MarkdownRenderer from "../../components/MarkdownRenderer";
 
 interface SkillInfo {
   name: string;
