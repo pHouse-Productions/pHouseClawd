@@ -658,11 +658,14 @@ ${body}`;
     proc.on("close", async (code) => {
       log(`[Watcher] Claude exited with code ${code}`);
 
-      // Stop typing indicator and wait a moment for any in-flight typing request to complete
+      // Stop typing indicator and wait for any in-flight typing request to complete
+      // The typing indicator lasts ~5 seconds on Telegram's end, so we need to wait
+      // long enough that the next message we send cancels it
       if (typingInterval) {
         clearInterval(typingInterval);
         typingInterval = null;
-        await new Promise(r => setTimeout(r, 100));
+        // Wait 500ms to ensure no typing indicator was just sent
+        await new Promise(r => setTimeout(r, 500));
       }
 
       // Flush any remaining buffered text
