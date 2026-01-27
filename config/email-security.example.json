@@ -2,5 +2,5 @@
   "trustedEmailAddresses": [
     "your-email@example.com"
   ],
-  "alertTelegramChatId": null
+  "forwardUntrustedTo": "your-email@example.com"
 }
