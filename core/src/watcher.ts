@@ -222,22 +222,35 @@ async function handleChannelEvent(
   log(`[Watcher] Processing event from ${channel.name}: ${sessionKey}`);
   log(`[Watcher] Prompt: ${prompt.slice(0, 100)}...`);
 
-  // Handle special commands for telegram
-  if (channel.name === "telegram" && payload.type === "message") {
+  // Handle special commands for interactive channels (telegram, gchat)
+  if ((channel.name === "telegram" || channel.name === "gchat") && payload.type === "message") {
     const text = payload.text?.trim().toLowerCase();
+
+    // Helper to send a message back to the channel
+    const sendReply = (message: string) => {
+      if (channel.name === "telegram") {
+        const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
+        spawn("npx", ["tsx", sendScript, String(payload.chat_id), message], {
+          cwd: PROJECT_ROOT,
+          stdio: ["ignore", "ignore", "ignore"],
+          detached: true,
+        }).unref();
+      } else if (channel.name === "gchat") {
+        const sendScript = path.join(PROJECT_ROOT, "listeners/gchat/send-message.ts");
+        spawn("npx", ["tsx", sendScript, payload.space_name, message], {
+          cwd: PROJECT_ROOT,
+          stdio: ["ignore", "ignore", "ignore"],
+          detached: true,
+        }).unref();
+      }
+    };
 
     if (text === "/new") {
       clearSession(sessionKey);
       log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
       const handler = channel.createHandler(event);
       handler.onComplete(0);
-      // Send confirmation
-      const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
-      spawn("npx", ["tsx", sendScript, String(payload.chat_id), "Fresh start, boss. New session is ready."], {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
-      }).unref();
+      sendReply("Fresh start, boss. New session is ready.");
       return;
     }
 
@@ -245,12 +258,7 @@ async function handleChannelEvent(
       log(`[Watcher] Restart requested via /restart command`);
       const handler = channel.createHandler(event);
       handler.onComplete(0);
-      const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
-      spawn("npx", ["tsx", sendScript, String(payload.chat_id), "Restarting... Back in a few seconds."], {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
-      }).unref();
+      sendReply("Restarting... Back in a few seconds.");
       spawn(path.join(PROJECT_ROOT, "restart.sh"), [], {
         cwd: PROJECT_ROOT,
         stdio: ["ignore", "ignore", "ignore"],
