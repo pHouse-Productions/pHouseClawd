@@ -366,7 +366,11 @@ export const TelegramChannel: ChannelDefinition = {
       }
     });
 
-    await bot.launch();
+    // Start bot without awaiting - launch() returns a Promise that only resolves
+    // when the bot is stopped, so we'd block forever if we awaited it
+    bot.launch().catch((err) => {
+      log(`[TelegramChannel] Bot error: ${err}`);
+    });
     log("[TelegramChannel] Bot started");
 
     // Return stop function
