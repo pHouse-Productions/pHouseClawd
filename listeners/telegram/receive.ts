@@ -12,11 +12,11 @@ const PROJECT_ROOT = path.resolve(__dirname, "../..");
 config({ path: "/home/ubuntu/pHouseMcp/.env" });
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
-const IMAGES_DIR = path.join(PROJECT_ROOT, "memory/telegram/images");
+const FILES_DIR = path.join(PROJECT_ROOT, "memory/telegram/files");
 
-// Ensure images directory exists
-if (!fs.existsSync(IMAGES_DIR)) {
-  fs.mkdirSync(IMAGES_DIR, { recursive: true });
+// Ensure files directory exists
+if (!fs.existsSync(FILES_DIR)) {
+  fs.mkdirSync(FILES_DIR, { recursive: true });
 }
 
 async function downloadFile(fileId: string, destPath: string): Promise<void> {
@@ -81,7 +81,7 @@ bot.on("message", async (ctx) => {
     const caption = ctx.message.caption || "";
     const timestamp = Date.now();
     const filename = `${chatId}_${timestamp}.jpg`;
-    const imagePath = path.join(IMAGES_DIR, filename);
+    const imagePath = path.join(FILES_DIR, filename);
 
     try {
       await downloadFile(largestPhoto.file_id, imagePath);
@@ -111,6 +111,48 @@ bot.on("message", async (ctx) => {
       }
     } catch (err) {
       console.error(`Failed to download photo: ${err}`);
+    }
+  }
+
+  // Handle document messages (PDFs, files, etc.)
+  if ("document" in ctx.message) {
+    const doc = ctx.message.document;
+    const caption = ctx.message.caption || "";
+    const timestamp = Date.now();
+    const originalName = doc.file_name || "document";
+    const filename = `${chatId}_${timestamp}_${originalName}`;
+    const filePath = path.join(FILES_DIR, filename);
+
+    try {
+      await downloadFile(doc.file_id, filePath);
+
+      // Save to history
+      saveMessage(chatId, {
+        role: "user",
+        name: from,
+        text: caption ? `[Document: ${originalName}] ${caption}` : `[Document: ${originalName}]`,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Push to event queue with file path and streaming verbosity
+      const eventId = pushEvent("telegram:document", "telegram", {
+        chat_id: chatId,
+        from,
+        caption,
+        file_path: filePath,
+        file_name: originalName,
+        mime_type: doc.mime_type || "application/octet-stream",
+        verbosity: "streaming",
+      });
+
+      console.log(JSON.stringify({ chat_id: chatId, from, caption, file_path: filePath, file_name: originalName, event_id: eventId }, null, 2));
+
+      if (mode === "once") {
+        bot.stop();
+        process.exit(0);
+      }
+    } catch (err) {
+      console.error(`Failed to download document: ${err}`);
     }
   }
 });

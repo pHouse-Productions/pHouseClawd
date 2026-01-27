@@ -31,6 +31,7 @@ function generateSessionId(name: string): string {
 
 const PENDING_DIR = path.join(PROJECT_ROOT, "events/pending");
 const SEND_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
+const PDF_SCRIPT = path.join(PROJECT_ROOT, "scripts/pdf-to-text.py");
 const LOGS_DIR = path.join(PROJECT_ROOT, "logs");
 const LOG_FILE = path.join(LOGS_DIR, "watcher.log");  // Watcher operational logs
 const STREAM_LOG = path.join(LOGS_DIR, "claude-stream.jsonl");  // Raw Claude stream events
@@ -44,6 +45,7 @@ const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-securit
 interface EmailSecurityConfig {
   trustedEmailAddresses: string[];
   alertTelegramChatId: number | null;
+  forwardUntrustedTo: string | null;
 }
 
 function loadEmailSecurityConfig(): EmailSecurityConfig {
@@ -53,13 +55,14 @@ function loadEmailSecurityConfig(): EmailSecurityConfig {
       return {
         trustedEmailAddresses: config.trustedEmailAddresses || [],
         alertTelegramChatId: config.alertTelegramChatId || null,
+        forwardUntrustedTo: config.forwardUntrustedTo || null,
       };
     }
   } catch (err) {
     log(`[Security] Failed to load email security config: ${err}`);
   }
-  // Default: no trusted addresses (all emails forwarded to Telegram if configured)
-  return { trustedEmailAddresses: [], alertTelegramChatId: null };
+  // Default: no trusted addresses (all emails forwarded if configured)
+  return { trustedEmailAddresses: [], alertTelegramChatId: null, forwardUntrustedTo: null };
 }
 
 // Cron job interface
@@ -196,6 +199,39 @@ async function sendToTelegram(chatId: number, message: string): Promise<void> {
   } catch (err) {
     log(`[Relay] Failed to send to Telegram: ${err}`);
   }
+}
+
+// Convert PDF to markdown text file using PyMuPDF
+async function convertPdfToText(pdfPath: string): Promise<string> {
+  const outputPath = pdfPath.replace(/\.pdf$/i, ".md");
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn("uvx", ["--from", "pymupdf", "python3", PDF_SCRIPT, pdfPath, outputPath], {
+      cwd: PROJECT_ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout.on("data", (data) => { stdout += data.toString(); });
+    proc.stderr.on("data", (data) => { stderr += data.toString(); });
+
+    proc.on("close", (code) => {
+      if (code === 0 && stdout.trim()) {
+        log(`[PDF] Converted ${pdfPath} -> ${stdout.trim()}`);
+        resolve(stdout.trim());
+      } else {
+        log(`[PDF] Failed to convert ${pdfPath}: ${stderr}`);
+        reject(new Error(stderr || "PDF conversion failed"));
+      }
+    });
+
+    proc.on("error", (err) => {
+      log(`[PDF] Spawn error: ${err.message}`);
+      reject(err);
+    });
+  });
 }
 
 // Send email reply via Gmail MCP script
@@ -388,6 +424,45 @@ async function handleEvent(event: Event): Promise<void> {
         : `[Telegram photo from ${photoFrom}]: User sent an image with no caption.\n\nIMPORTANT: Use the Read tool to view the image at: ${image_path}`;
       break;
 
+    case "telegram:document":
+      const { chat_id: docChatId, from: docFrom, caption: docCaption, file_path, file_name, mime_type, verbosity: docVerbosity } = event.payload as {
+        chat_id: number;
+        from: string;
+        caption: string;
+        file_path: string;
+        file_name: string;
+        mime_type: string;
+        verbosity?: Verbosity;
+      };
+
+      sessionKey = `telegram-${docChatId}`;
+      relayBuffer = createRelayBuffer(docChatId, docVerbosity || "streaming");
+
+      // Provide appropriate instructions based on file type
+      let fileInstructions: string;
+      let fileToRead = file_path;
+
+      if (mime_type === "application/pdf" || file_name.toLowerCase().endsWith(".pdf")) {
+        // Convert PDF to text first
+        try {
+          const textPath = await convertPdfToText(file_path);
+          fileToRead = textPath;
+          fileInstructions = `The PDF has been converted to text. Use the Read tool to view it at: ${textPath}`;
+        } catch (err) {
+          log(`[PDF] Conversion failed, falling back to raw path: ${err}`);
+          fileInstructions = `PDF conversion failed. The raw PDF is at: ${file_path}`;
+        }
+      } else if (mime_type.startsWith("image/")) {
+        fileInstructions = `Use the Read tool to view the image at: ${file_path}`;
+      } else {
+        fileInstructions = `The file has been saved to: ${file_path}`;
+      }
+
+      prompt = docCaption
+        ? `[Telegram document from ${docFrom}]: ${docCaption}\n\nFile: ${file_name} (${mime_type})\n\nIMPORTANT: ${fileInstructions}`
+        : `[Telegram document from ${docFrom}]: User sent a file.\n\nFile: ${file_name} (${mime_type})\n\nIMPORTANT: ${fileInstructions}`;
+      break;
+
     case "gmail:email":
       const { uid, from: emailFrom, to, subject, date, body, thread_id, message_id } = event.payload as {
         uid: number;
@@ -408,12 +483,14 @@ async function handleEvent(event: Event): Promise<void> {
       );
 
       if (!isTrustedSender) {
-        // Untrusted sender - notify on Telegram if configured, do NOT reply directly
+        // Untrusted sender - forward to Mike's email if configured, do NOT reply directly
         log(`[Security] Untrusted email sender: ${emailFrom} - blocking auto-reply`);
 
-        if (emailSecurityConfig.alertTelegramChatId) {
-          const alertMessage = `Got an email from an untrusted address. Not replying directly.\n\nFrom: ${emailFrom}\nSubject: ${subject}\nDate: ${date}\n\n${body.slice(0, 500)}${body.length > 500 ? '...' : ''}\n\nReply here if you want me to respond.`;
-          await sendToTelegram(emailSecurityConfig.alertTelegramChatId, alertMessage);
+        if (emailSecurityConfig.forwardUntrustedTo) {
+          const forwardSubject = `Fwd: ${subject}`;
+          const forwardBody = `---------- Forwarded message ----------\nFrom: ${emailFrom}\nDate: ${date}\nSubject: ${subject}\n\n${body}`;
+          await sendEmailReply(emailSecurityConfig.forwardUntrustedTo, forwardSubject, forwardBody);
+          log(`[Security] Forwarded untrusted email to ${emailSecurityConfig.forwardUntrustedTo}`);
         }
         return; // Skip Claude invocation entirely
       }
