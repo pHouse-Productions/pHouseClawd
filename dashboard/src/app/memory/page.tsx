@@ -1,9 +1,15 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import MarkdownRenderer from "../../components/MarkdownRenderer";
 
-const LONG_TERM_DIR = "/home/ubuntu/pHouseClawd/memory/long-term";
-const SHORT_TERM_FILE = "/home/ubuntu/pHouseClawd/memory/short-term/buffer.txt";
+// Resolve project root relative to this file (dashboard/src/app/memory/page.tsx -> project root)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = process.env.PHOUSE_PROJECT_ROOT || path.resolve(__dirname, "../../../../..");
+
+const LONG_TERM_DIR = path.join(PROJECT_ROOT, "memory/long-term");
+const SHORT_TERM_FILE = path.join(PROJECT_ROOT, "memory/short-term/buffer.txt");
 const SIZE_THRESHOLD = 10 * 1024; // 10KB
 
 interface MemoryFile {
