@@ -12,8 +12,8 @@ interface CronJob {
   prompt: string;
   enabled: boolean;
   lastRun?: string;
-  runAt?: number;
-  oneOff?: boolean;
+  run_at?: string;
+  run_once?: boolean;
 }
 
 interface CronConfig {
@@ -32,8 +32,8 @@ async function getCronJobs(): Promise<CronJob[]> {
 }
 
 function formatSchedule(job: CronJob): string {
-  if (job.oneOff && job.runAt) {
-    const date = new Date(job.runAt);
+  if (job.run_once && job.run_at) {
+    const date = new Date(job.run_at);
     return `Once at ${date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`;
   }
   return job.schedule;
@@ -43,9 +43,9 @@ export const dynamic = "force-dynamic";
 
 export default async function CronPage() {
   const jobs = await getCronJobs();
-  const activeJobs = jobs.filter((j) => j.enabled && !j.oneOff);
-  const oneOffJobs = jobs.filter((j) => j.oneOff);
-  const disabledJobs = jobs.filter((j) => !j.enabled && !j.oneOff);
+  const activeJobs = jobs.filter((j) => j.enabled && !j.run_once);
+  const oneOffJobs = jobs.filter((j) => j.run_once);
+  const disabledJobs = jobs.filter((j) => !j.enabled && !j.run_once);
 
   return (
     <div className="space-y-6">
