@@ -13,6 +13,7 @@ import {
 } from "./channels/index.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
+import { GChatChannel } from "./channels/gchat.js";
 
 // Load environment variables
 config({ path: "/home/ubuntu/pHouseMcp/.env" });
@@ -666,6 +667,7 @@ async function watch(): Promise<void> {
   const channels: ChannelDefinition[] = [
     TelegramChannel,
     EmailChannel,
+    GChatChannel,
   ];
 
   const stopFunctions: (() => void)[] = [];
