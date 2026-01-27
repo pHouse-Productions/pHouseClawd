@@ -12,10 +12,8 @@ CLAUDE.md
 config/cron.json
 config/email-security.json
 
-# Gmail OAuth tokens and secrets (personal)
-integrations/gmail/tokens.json
-integrations/gmail/client_secret.json
-integrations/gmail/last_history_id.txt
+# Gmail state file
+listeners/gmail/last_history_id.txt
 
 # Memory and logs (personal data, but keep directory structure)
 memory/**
