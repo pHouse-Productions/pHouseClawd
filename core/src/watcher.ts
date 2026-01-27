@@ -5,6 +5,7 @@ import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import cron from "node-cron";
 import { getPendingEvents, markProcessed, Event, pushEvent } from "./events.js";
+import { Channel, TelegramChannel, EmailChannel } from "./channels/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,7 +31,6 @@ function generateSessionId(name: string): string {
 }
 
 const PENDING_DIR = path.join(PROJECT_ROOT, "events/pending");
-const SEND_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
 const PDF_SCRIPT = path.join(PROJECT_ROOT, "scripts/pdf-to-text.py");
 const LOGS_DIR = path.join(PROJECT_ROOT, "logs");
 const LOG_FILE = path.join(LOGS_DIR, "watcher.log");  // Watcher operational logs
@@ -164,67 +164,6 @@ function logStreamEvent(event: any) {
 // Verbosity levels for chat surfaces
 type Verbosity = "streaming" | "progress" | "final";
 
-// Message buffer for batching relay messages
-interface RelayBuffer {
-  chatId: number | null;  // null for email
-  verbosity: Verbosity;
-  textBuffer: string;
-  lastFlush: number;
-  flushTimer: NodeJS.Timeout | null;
-  // Email-specific fields
-  email?: {
-    replyTo: string;
-    subject: string;
-    threadId?: string;
-    messageId?: string;  // Original email's Message-ID for In-Reply-To header
-  };
-}
-
-const FLUSH_INTERVAL_MS = 2000; // Batch messages every 2 seconds
-const MIN_CHARS_TO_FLUSH = 50; // Or flush when we have this many chars
-
-
-// Send message to Telegram (fire and forget)
-async function sendToTelegram(chatId: number, message: string): Promise<void> {
-  if (!message || !message.trim()) return;
-
-  try {
-    const proc = spawn("npx", ["tsx", SEND_SCRIPT, String(chatId), message], {
-      cwd: PROJECT_ROOT,
-      stdio: ["ignore", "ignore", "ignore"],
-      detached: true,
-    });
-    proc.unref();
-    log(`[Relay] Sent to Telegram ${chatId}: ${message.slice(0, 100)}${message.length > 100 ? '...' : ''}`);
-  } catch (err) {
-    log(`[Relay] Failed to send to Telegram: ${err}`);
-  }
-}
-
-// Send typing indicator to Telegram
-const TYPING_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/typing.ts");
-async function sendTypingIndicator(chatId: number): Promise<void> {
-  try {
-    const proc = spawn("npx", ["tsx", TYPING_SCRIPT, String(chatId)], {
-      cwd: PROJECT_ROOT,
-      stdio: ["ignore", "ignore", "ignore"],
-      detached: true,
-    });
-    proc.unref();
-  } catch (err) {
-    log(`[Typing] Failed to send typing indicator: ${err}`);
-  }
-}
-
-// Start a typing indicator interval that sends every 4 seconds
-// (Telegram typing indicators last ~5 seconds, so 4s gives overlap)
-function startTypingInterval(chatId: number): NodeJS.Timeout {
-  // Send immediately
-  sendTypingIndicator(chatId);
-  // Then repeat every 4 seconds
-  return setInterval(() => sendTypingIndicator(chatId), 4000);
-}
-
 // Convert PDF to markdown text file using PyMuPDF
 async function convertPdfToText(pdfPath: string): Promise<string> {
   const outputPath = pdfPath.replace(/\.pdf$/i, ".md");
@@ -258,7 +197,7 @@ async function convertPdfToText(pdfPath: string): Promise<string> {
   });
 }
 
-// Send email reply via Gmail MCP script
+// Send email reply via Gmail MCP script (used for forwarding untrusted emails)
 async function sendEmailReply(to: string, subject: string, body: string, threadId?: string, messageId?: string): Promise<void> {
   if (!body || !body.trim()) return;
 
@@ -283,88 +222,6 @@ async function sendEmailReply(to: string, subject: string, body: string, threadI
   }
 }
 
-// Flush buffered text to chat surface
-function flushBuffer(buffer: RelayBuffer): void {
-  if (buffer.flushTimer) {
-    clearTimeout(buffer.flushTimer);
-    buffer.flushTimer = null;
-  }
-
-  const text = buffer.textBuffer.trim();
-  if (text) {
-    sendToTelegram(buffer.chatId, text);
-    buffer.textBuffer = "";
-  }
-  buffer.lastFlush = Date.now();
-}
-
-// Add text to buffer, flushing if needed
-function bufferText(buffer: RelayBuffer, text: string): void {
-  buffer.textBuffer += text;
-
-  // Flush if we have enough text or it's been a while
-  const timeSinceFlush = Date.now() - buffer.lastFlush;
-  if (buffer.textBuffer.length >= MIN_CHARS_TO_FLUSH || timeSinceFlush > FLUSH_INTERVAL_MS) {
-    flushBuffer(buffer);
-  } else if (!buffer.flushTimer) {
-    // Set a timer to flush later
-    buffer.flushTimer = setTimeout(() => flushBuffer(buffer), FLUSH_INTERVAL_MS);
-  }
-}
-
-// Create a new relay buffer for a chat session
-function createRelayBuffer(chatId: number, verbosity: Verbosity): RelayBuffer {
-  return {
-    chatId,
-    verbosity,
-    textBuffer: "",
-    lastFlush: Date.now(),
-    flushTimer: null,
-  };
-}
-
-interface RelayInfo {
-  text: string | null;      // Text to relay to chat
-  progress: string | null;  // Progress update (tool use, errors)
-}
-
-// Extract relay info from a stream event
-function getRelayInfo(event: any): RelayInfo {
-  const result: RelayInfo = { text: null, progress: null };
-
-  switch (event.type) {
-    case "assistant":
-      // Claude CLI gives us complete messages, not deltas
-      if (event.message?.content) {
-        const text = event.message.content
-          .filter((c: any) => c.type === "text")
-          .map((c: any) => c.text)
-          .join("");
-        if (text) result.text = text;
-      }
-      break;
-
-    case "content_block_start":
-      if (event.content_block?.type === "tool_use") {
-        result.progress = `Using ${event.content_block.name}...`;
-      }
-      break;
-
-    case "content_block_delta":
-      // Handle streaming deltas if they ever appear
-      if (event.delta?.type === "text_delta") {
-        result.text = event.delta.text;
-      }
-      break;
-
-    case "error":
-      result.progress = `Error: ${event.error?.message || 'Unknown error'}`;
-      break;
-  }
-
-  return result;
-}
-
 async function handleEvent(event: Event): Promise<void> {
   log(`[Watcher] Processing: ${event.type} from ${event.source}`);
   log(`[Watcher] Payload: ${JSON.stringify(event.payload)}`);
@@ -379,11 +236,8 @@ async function handleEvent(event: Event): Promise<void> {
   // Check for /new command to start fresh session
   let forceNewSession = false;
 
-  // Relay buffer for streaming output to chat surfaces
-  let relayBuffer: RelayBuffer | null = null;
-
-  // Typing indicator interval for telegram messages
-  let typingInterval: NodeJS.Timeout | null = null;
+  // Channel for handling stream events (Telegram, Email, etc.)
+  let channel: Channel | null = null;
 
   switch (event.type) {
     case "telegram:message":
@@ -394,11 +248,8 @@ async function handleEvent(event: Event): Promise<void> {
         verbosity?: Verbosity;
       };
 
-      // Default telegram to streaming verbosity
-      relayBuffer = createRelayBuffer(chat_id, msgVerbosity || "streaming");
-
-      // Start typing indicator for telegram messages
-      typingInterval = startTypingInterval(chat_id);
+      // Create telegram channel (handles typing indicators and message relay)
+      channel = new TelegramChannel(chat_id, msgVerbosity || "streaming");
 
       sessionKey = `telegram-${chat_id}`;
 
@@ -406,7 +257,8 @@ async function handleEvent(event: Event): Promise<void> {
       if (text.trim().toLowerCase() === "/new") {
         clearSession(sessionKey);
         log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
-        // Send confirmation and return early - no need to invoke Claude
+        // Stop typing and send confirmation
+        channel.onComplete(0);
         const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
         spawn("npx", ["tsx", sendScript, String(chat_id), "Fresh start, boss. New session is ready."], {
           cwd: PROJECT_ROOT,
@@ -419,6 +271,8 @@ async function handleEvent(event: Event): Promise<void> {
       // Handle /restart command
       if (text.trim().toLowerCase() === "/restart") {
         log(`[Watcher] Restart requested via /restart command`);
+        // Stop typing and send confirmation
+        channel.onComplete(0);
         const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
         spawn("npx", ["tsx", sendScript, String(chat_id), "Restarting... Back in a few seconds."], {
           cwd: PROJECT_ROOT,
@@ -447,8 +301,7 @@ async function handleEvent(event: Event): Promise<void> {
       };
 
       sessionKey = `telegram-${photoChatId}`;
-      relayBuffer = createRelayBuffer(photoChatId, photoVerbosity || "streaming");
-      typingInterval = startTypingInterval(photoChatId);
+      channel = new TelegramChannel(photoChatId, photoVerbosity || "streaming");
       imagePath = image_path;
       prompt = caption
         ? `[Telegram photo from ${photoFrom}]: ${caption}\n\nIMPORTANT: User sent an image. Use the Read tool to view the image at: ${image_path}`
@@ -467,8 +320,7 @@ async function handleEvent(event: Event): Promise<void> {
       };
 
       sessionKey = `telegram-${docChatId}`;
-      relayBuffer = createRelayBuffer(docChatId, docVerbosity || "streaming");
-      typingInterval = startTypingInterval(docChatId);
+      channel = new TelegramChannel(docChatId, docVerbosity || "streaming");
 
       // Provide appropriate instructions based on file type
       let fileInstructions: string;
@@ -530,20 +382,13 @@ async function handleEvent(event: Event): Promise<void> {
       // Use thread_id if available, otherwise use subject as session key
       sessionKey = `email-${thread_id || subject.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 50)}`;
 
-      // Create relay buffer for email with "final" verbosity (accumulate all, send once at end)
-      relayBuffer = {
-        chatId: null,
-        verbosity: "final",
-        textBuffer: "",
-        lastFlush: Date.now(),
-        flushTimer: null,
-        email: {
-          replyTo: emailFrom,
-          subject: subject,
-          threadId: thread_id,
-          messageId: message_id,
-        },
-      };
+      // Create email channel
+      channel = new EmailChannel({
+        replyTo: emailFrom,
+        subject: subject,
+        threadId: thread_id,
+        messageId: message_id,
+      });
 
       prompt = `[Email from ${emailFrom}]
 Subject: ${subject}
@@ -628,18 +473,9 @@ ${body}`;
           // Log every event to JSONL
           logStreamEvent(streamEvent);
 
-          // Extract relay info and send to chat if applicable
-          const { text, progress } = getRelayInfo(streamEvent);
-
-          if (relayBuffer && text) {
-            if (relayBuffer.verbosity === "streaming") {
-              bufferText(relayBuffer, text);
-            } else if (relayBuffer.verbosity === "final") {
-              relayBuffer.textBuffer += text;
-            }
-          }
-          if (relayBuffer && relayBuffer.verbosity === "progress" && progress && relayBuffer.chatId) {
-            sendToTelegram(relayBuffer.chatId, progress);
+          // Pass stream event to channel for handling
+          if (channel) {
+            channel.onStreamEvent(streamEvent);
           }
         } catch {
           // Not JSON, log raw line
@@ -655,33 +491,12 @@ ${body}`;
       process.stderr.write(chunk);
     });
 
-    proc.on("close", async (code) => {
+    proc.on("close", (code) => {
       log(`[Watcher] Claude exited with code ${code}`);
 
-      // Stop typing indicator and wait for any in-flight typing request to complete
-      // The typing indicator lasts ~5 seconds on Telegram's end, so we need to wait
-      // long enough that the next message we send cancels it
-      if (typingInterval) {
-        clearInterval(typingInterval);
-        typingInterval = null;
-        // Wait 500ms to ensure no typing indicator was just sent
-        await new Promise(r => setTimeout(r, 500));
-      }
-
-      // Flush any remaining buffered text
-      if (relayBuffer) {
-        if (relayBuffer.flushTimer) {
-          clearTimeout(relayBuffer.flushTimer);
-          relayBuffer.flushTimer = null;
-        }
-        if (relayBuffer.textBuffer.trim()) {
-          // Check if this is an email relay (send email reply) or Telegram relay
-          if (relayBuffer.email) {
-            sendEmailReply(relayBuffer.email.replyTo, relayBuffer.email.subject, relayBuffer.textBuffer.trim(), relayBuffer.email.threadId, relayBuffer.email.messageId);
-          } else if (relayBuffer.chatId) {
-            sendToTelegram(relayBuffer.chatId, relayBuffer.textBuffer.trim());
-          }
-        }
+      // Notify channel that we're done
+      if (channel) {
+        channel.onComplete(code || 0);
       }
 
       if (code !== 0) {
@@ -699,10 +514,9 @@ ${body}`;
 
     proc.on("error", (err) => {
       log(`[Watcher] Claude spawn error: ${err.message}`);
-      // Stop typing indicator on error
-      if (typingInterval) {
-        clearInterval(typingInterval);
-        typingInterval = null;
+      // Notify channel of error
+      if (channel) {
+        channel.onComplete(1);
       }
       reject(err);
     });
