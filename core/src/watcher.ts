@@ -45,6 +45,16 @@ const STREAM_LOG = path.join(LOGS_DIR, "claude-stream.jsonl");
 const SESSIONS_FILE = path.join(LOGS_DIR, "sessions.json");
 const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
 
+// Short-term memory
+const SHORT_TERM_MEMORY_DIR = path.join(PROJECT_ROOT, "memory/short-term");
+const SHORT_TERM_MEMORY_FILE = path.join(SHORT_TERM_MEMORY_DIR, "buffer.txt");
+const SHORT_TERM_SIZE_THRESHOLD = 10 * 1024; // 10KB to start
+
+// Ensure short-term memory directory exists
+if (!fs.existsSync(SHORT_TERM_MEMORY_DIR)) {
+  fs.mkdirSync(SHORT_TERM_MEMORY_DIR, { recursive: true });
+}
+
 // Email security config
 const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-security.json");
 
@@ -192,6 +202,70 @@ function logStreamEvent(event: any) {
   fs.appendFileSync(STREAM_LOG, JSON.stringify(entry) + "\n");
 }
 
+// Short-term memory logging
+function getTorontoTimestamp(): string {
+  return new Date().toLocaleString("en-US", {
+    timeZone: "America/Toronto",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function logToShortTermMemory(channel: string, direction: "in" | "out", content: string): void {
+  const timestamp = getTorontoTimestamp();
+  const line = `[${timestamp}] [${channel}] [${direction}] ${content}\n`;
+  fs.appendFileSync(SHORT_TERM_MEMORY_FILE, line);
+}
+
+function getShortTermMemorySize(): number {
+  try {
+    if (fs.existsSync(SHORT_TERM_MEMORY_FILE)) {
+      return fs.statSync(SHORT_TERM_MEMORY_FILE).size;
+    }
+  } catch {}
+  return 0;
+}
+
+function checkShortTermMemorySize(): void {
+  const size = getShortTermMemorySize();
+  if (size >= SHORT_TERM_SIZE_THRESHOLD) {
+    log(`[Memory] Short-term memory at ${size} bytes (threshold: ${SHORT_TERM_SIZE_THRESHOLD}). Roll-up recommended.`);
+  }
+}
+
+// Extract text from stream event for logging (always at streaming level)
+function extractTextFromStreamEvent(event: any): string | null {
+  switch (event.type) {
+    case "assistant":
+      if (event.message?.content) {
+        const text = event.message.content
+          .filter((c: any) => c.type === "text")
+          .map((c: any) => c.text)
+          .join("");
+        if (text) return text;
+      }
+      break;
+
+    case "content_block_delta":
+      if (event.delta?.type === "text_delta") {
+        return event.delta.text;
+      }
+      break;
+
+    case "content_block_start":
+      if (event.content_block?.type === "tool_use") {
+        return `[Using ${event.content_block.name}...]`;
+      }
+      break;
+  }
+  return null;
+}
+
 // Convert PDF to markdown text file using PyMuPDF
 async function convertPdfToText(pdfPath: string): Promise<string> {
   const outputPath = pdfPath.replace(/\.pdf$/i, ".md");
@@ -251,6 +325,29 @@ async function handleChannelEvent(
 
   log(`[Watcher] Processing event from ${channel.name}: ${sessionKey}`);
   log(`[Watcher] Prompt: ${prompt.slice(0, 100)}...`);
+
+  // Log incoming event to short-term memory
+  // Format depends on channel type
+  let incomingContent = "";
+  if (channel.name === "telegram") {
+    const from = payload.from || "Unknown";
+    if (payload.type === "message") {
+      incomingContent = `${from}: ${payload.text}`;
+    } else if (payload.type === "photo") {
+      incomingContent = `${from}: [Photo] ${payload.caption || ""}`;
+    } else if (payload.type === "document") {
+      incomingContent = `${from}: [Document: ${payload.file_name}] ${payload.caption || ""}`;
+    }
+  } else if (channel.name === "email") {
+    incomingContent = `From: ${payload.from}\nSubject: ${payload.subject}\n\n${payload.body}`;
+  } else if (channel.name === "gchat") {
+    const from = payload.sender_name || "Unknown";
+    incomingContent = `${from}: ${payload.text}`;
+  }
+
+  if (incomingContent) {
+    logToShortTermMemory(channel.name, "in", incomingContent);
+  }
 
   // Handle special commands for interactive channels (telegram, gchat)
   if ((channel.name === "telegram" || channel.name === "gchat") && payload.type === "message") {
@@ -373,6 +470,7 @@ async function handleChannelEvent(
     let stdout = "";
     let stderr = "";
     let lineBuffer = "";
+    let outgoingTextBuffer = ""; // Buffer for short-term memory logging
 
     proc.stdout.on("data", (data) => {
       const chunk = data.toString();
@@ -388,6 +486,12 @@ async function handleChannelEvent(
           const streamEvent = JSON.parse(line);
           logStreamEvent(streamEvent);
           handler.onStreamEvent(streamEvent);
+
+          // Accumulate text for short-term memory (at streaming level)
+          const text = extractTextFromStreamEvent(streamEvent);
+          if (text) {
+            outgoingTextBuffer += text;
+          }
         } catch {
           log(`[Stream] Non-JSON: ${line}`);
         }
@@ -404,6 +508,12 @@ async function handleChannelEvent(
     proc.on("close", (code) => {
       log(`[Watcher] Claude exited with code ${code}`);
       handler.onComplete(code || 0);
+
+      // Log outgoing response to short-term memory
+      if (outgoingTextBuffer.trim()) {
+        logToShortTermMemory(channel.name, "out", `Vito: ${outgoingTextBuffer.trim()}`);
+        checkShortTermMemorySize();
+      }
 
       if (code !== 0) {
         log(`[Watcher] Claude error - stderr: ${stderr}`);
