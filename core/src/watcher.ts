@@ -839,7 +839,11 @@ class CronEventHandler implements ChannelEventHandler {
 
 async function handleCronJob(job: CronJob): Promise<void> {
   const sessionKey = `cron-${job.id}`;
-  const prompt = `[Scheduled Task: ${job.description}]\n\n${job.prompt}`;
+
+  // Add reminder to log outbound messages for visibility
+  const loggingReminder = `IMPORTANT: Before calling send_message or send_email, always output the message content as text first. This ensures the message gets logged. Example: "Sending to Mike: [your message here]" then call the MCP tool.`;
+
+  const prompt = `[Scheduled Task: ${job.description}]\n\n${loggingReminder}\n\n${job.prompt}`;
 
   const generation = getSessionGeneration(sessionKey);
   const sessionId = generateSessionId(`${sessionKey}-gen${generation}`);

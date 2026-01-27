@@ -34,7 +34,7 @@ async function getCronJobs(): Promise<CronJob[]> {
 function formatSchedule(job: CronJob): string {
   if (job.run_once && job.run_at) {
     const date = new Date(job.run_at);
-    return `Once at ${date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`;
+    return `Once at ${date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "America/Toronto" })}`;
   }
   return job.schedule;
 }
