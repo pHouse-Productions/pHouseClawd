@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 interface NoteFile {
   name: string;
@@ -102,11 +103,9 @@ export default async function NotesPage({
                   {selectedNote?.name || "Select a note"}
                 </h3>
               </div>
-              <div className="p-6 prose prose-invert prose-sm max-w-none">
+              <div className="p-6">
                 {selectedNote ? (
-                  <pre className="whitespace-pre-wrap text-zinc-300 text-sm font-mono bg-transparent p-0 m-0">
-                    {selectedNote.content}
-                  </pre>
+                  <MarkdownRenderer content={selectedNote.content} />
                 ) : (
                   <p className="text-zinc-500">Select a note to view</p>
                 )}
