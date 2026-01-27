@@ -231,11 +231,93 @@ function getShortTermMemorySize(): number {
   return 0;
 }
 
-function checkShortTermMemorySize(): void {
+// Track if rollup is in progress to avoid concurrent rollups
+let rollupInProgress = false;
+
+async function checkAndTriggerRollup(): Promise<void> {
   const size = getShortTermMemorySize();
-  if (size >= SHORT_TERM_SIZE_THRESHOLD) {
-    log(`[Memory] Short-term memory at ${size} bytes (threshold: ${SHORT_TERM_SIZE_THRESHOLD}). Roll-up recommended.`);
+  if (size < SHORT_TERM_SIZE_THRESHOLD) {
+    return;
   }
+
+  if (rollupInProgress) {
+    log(`[Memory] Rollup already in progress, skipping.`);
+    return;
+  }
+
+  log(`[Memory] Short-term memory at ${size} bytes (threshold: ${SHORT_TERM_SIZE_THRESHOLD}). Triggering auto-rollup...`);
+  rollupInProgress = true;
+
+  try {
+    await performRollup();
+    log(`[Memory] Auto-rollup completed successfully.`);
+  } catch (err) {
+    log(`[Memory] Auto-rollup failed: ${err}`);
+  } finally {
+    rollupInProgress = false;
+  }
+}
+
+async function performRollup(): Promise<void> {
+  // Read the short-term buffer
+  const shortTermContent = fs.readFileSync(SHORT_TERM_MEMORY_FILE, "utf-8");
+  if (!shortTermContent.trim()) {
+    log(`[Memory] Short-term buffer is empty, nothing to roll up.`);
+    return;
+  }
+
+  const rollupPrompt = `You need to perform a memory rollup. Here is the short-term memory buffer containing recent conversations:
+
+---
+${shortTermContent}
+---
+
+Please:
+1. Review the conversations above
+2. Extract important information worth remembering long-term (decisions made, learnings, project updates, personal info, preferences, etc.)
+3. Use the 'remember' tool to save important memories to appropriate files in long-term memory (e.g., journal.md for activity log, projects.md for project updates, etc.)
+4. After saving, use the 'rollup' tool with clear=true to clear the short-term buffer
+
+Be selective - not everything needs to be saved. Focus on information that would be useful to recall in future sessions.`;
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(
+      "claude",
+      [
+        "-p",
+        "--output-format", "stream-json",
+        "--dangerously-skip-permissions",
+        rollupPrompt
+      ],
+      {
+        cwd: PROJECT_ROOT,
+        env: { ...process.env, FORCE_COLOR: "0" },
+        stdio: ["ignore", "pipe", "pipe"],
+      }
+    );
+
+    let stderr = "";
+
+    proc.stdout.on("data", (data) => {
+      // Just consume stdout, we don't need to process it
+    });
+
+    proc.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Rollup process exited with code ${code}: ${stderr}`));
+      }
+    });
+
+    proc.on("error", (err) => {
+      reject(err);
+    });
+  });
 }
 
 // Extract text from stream event for logging (always at streaming level)
@@ -512,7 +594,8 @@ async function handleChannelEvent(
       // Log outgoing response to short-term memory
       if (outgoingTextBuffer.trim()) {
         logToShortTermMemory(channel.name, "out", `Assistant: ${outgoingTextBuffer.trim()}`);
-        checkShortTermMemorySize();
+        // Check if we need to trigger auto-rollup (async, don't block)
+        checkAndTriggerRollup().catch(err => log(`[Memory] Rollup error: ${err}`));
       }
 
       if (code !== 0) {
