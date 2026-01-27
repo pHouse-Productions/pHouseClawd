@@ -201,6 +201,30 @@ async function sendToTelegram(chatId: number, message: string): Promise<void> {
   }
 }
 
+// Send typing indicator to Telegram
+const TYPING_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/typing.ts");
+async function sendTypingIndicator(chatId: number): Promise<void> {
+  try {
+    const proc = spawn("npx", ["tsx", TYPING_SCRIPT, String(chatId)], {
+      cwd: PROJECT_ROOT,
+      stdio: ["ignore", "ignore", "ignore"],
+      detached: true,
+    });
+    proc.unref();
+  } catch (err) {
+    log(`[Typing] Failed to send typing indicator: ${err}`);
+  }
+}
+
+// Start a typing indicator interval that sends every 4 seconds
+// (Telegram typing indicators last ~5 seconds, so 4s gives overlap)
+function startTypingInterval(chatId: number): NodeJS.Timeout {
+  // Send immediately
+  sendTypingIndicator(chatId);
+  // Then repeat every 4 seconds
+  return setInterval(() => sendTypingIndicator(chatId), 4000);
+}
+
 // Convert PDF to markdown text file using PyMuPDF
 async function convertPdfToText(pdfPath: string): Promise<string> {
   const outputPath = pdfPath.replace(/\.pdf$/i, ".md");
@@ -358,6 +382,9 @@ async function handleEvent(event: Event): Promise<void> {
   // Relay buffer for streaming output to chat surfaces
   let relayBuffer: RelayBuffer | null = null;
 
+  // Typing indicator interval for telegram messages
+  let typingInterval: NodeJS.Timeout | null = null;
+
   switch (event.type) {
     case "telegram:message":
       const { chat_id, from, text, verbosity: msgVerbosity } = event.payload as {
@@ -369,6 +396,9 @@ async function handleEvent(event: Event): Promise<void> {
 
       // Default telegram to streaming verbosity
       relayBuffer = createRelayBuffer(chat_id, msgVerbosity || "streaming");
+
+      // Start typing indicator for telegram messages
+      typingInterval = startTypingInterval(chat_id);
 
       sessionKey = `telegram-${chat_id}`;
 
@@ -418,6 +448,7 @@ async function handleEvent(event: Event): Promise<void> {
 
       sessionKey = `telegram-${photoChatId}`;
       relayBuffer = createRelayBuffer(photoChatId, photoVerbosity || "streaming");
+      typingInterval = startTypingInterval(photoChatId);
       imagePath = image_path;
       prompt = caption
         ? `[Telegram photo from ${photoFrom}]: ${caption}\n\nIMPORTANT: User sent an image. Use the Read tool to view the image at: ${image_path}`
@@ -437,6 +468,7 @@ async function handleEvent(event: Event): Promise<void> {
 
       sessionKey = `telegram-${docChatId}`;
       relayBuffer = createRelayBuffer(docChatId, docVerbosity || "streaming");
+      typingInterval = startTypingInterval(docChatId);
 
       // Provide appropriate instructions based on file type
       let fileInstructions: string;
@@ -626,6 +658,12 @@ ${body}`;
     proc.on("close", (code) => {
       log(`[Watcher] Claude exited with code ${code}`);
 
+      // Stop typing indicator
+      if (typingInterval) {
+        clearInterval(typingInterval);
+        typingInterval = null;
+      }
+
       // Flush any remaining buffered text
       if (relayBuffer) {
         if (relayBuffer.flushTimer) {
@@ -657,6 +695,11 @@ ${body}`;
 
     proc.on("error", (err) => {
       log(`[Watcher] Claude spawn error: ${err.message}`);
+      // Stop typing indicator on error
+      if (typingInterval) {
+        clearInterval(typingInterval);
+        typingInterval = null;
+      }
       reject(err);
     });
   });
