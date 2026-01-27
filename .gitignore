@@ -37,6 +37,11 @@ events/pending/*.json
 events/processed/*.json
 !events/processed/.gitkeep
 
+# Compiled JavaScript output (we use tsx to run TypeScript directly)
+*.js
+!*.config.js
+!next.config.js
+
 # IDE and OS
 .DS_Store
 .vscode/
