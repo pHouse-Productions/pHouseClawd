@@ -8,7 +8,7 @@ const PROJECT_ROOT = process.env.PHOUSE_PROJECT_ROOT || path.resolve(process.cwd
 
 const LONG_TERM_DIR = path.join(PROJECT_ROOT, "memory/long-term");
 const SHORT_TERM_FILE = path.join(PROJECT_ROOT, "memory/short-term/buffer.txt");
-const SIZE_THRESHOLD = 10 * 1024; // 10KB
+const SIZE_THRESHOLD = 100 * 1024; // 100KB
 
 interface MemoryFile {
   name: string;
