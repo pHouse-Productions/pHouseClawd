@@ -48,7 +48,8 @@ const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
 // Short-term memory
 const SHORT_TERM_MEMORY_DIR = path.join(PROJECT_ROOT, "memory/short-term");
 const SHORT_TERM_MEMORY_FILE = path.join(SHORT_TERM_MEMORY_DIR, "buffer.txt");
-const SHORT_TERM_SIZE_THRESHOLD = 10 * 1024; // 10KB to start
+const SHORT_TERM_SIZE_THRESHOLD = 100 * 1024; // 100KB
+const SHORT_TERM_RETAIN_RATIO = 0.25; // Keep 25% of buffer after rollup
 
 // Ensure short-term memory directory exists
 if (!fs.existsSync(SHORT_TERM_MEMORY_DIR)) {
@@ -299,6 +300,9 @@ async function performRollup(): Promise<void> {
     return;
   }
 
+  const lines = shortTermContent.trim().split("\n");
+  const totalLines = lines.length;
+
   const rollupPrompt = `You need to perform a memory rollup. Here is the short-term memory buffer containing recent conversations:
 
 ---
@@ -309,7 +313,7 @@ Please:
 1. Review the conversations above
 2. Extract important information worth remembering long-term (decisions made, learnings, project updates, personal info, preferences, etc.)
 3. Use the 'remember' tool to save important memories to appropriate files in long-term memory (e.g., journal.md for activity log, projects.md for project updates, etc.)
-4. After saving, use the 'rollup' tool with clear=true to clear the short-term buffer
+4. Do NOT call the rollup tool with clear=true - the watcher will handle trimming the buffer.
 
 Be selective - not everything needs to be saved. Focus on information that would be useful to recall in future sessions.`;
 
@@ -342,6 +346,11 @@ Be selective - not everything needs to be saved. Focus on information that would
 
     proc.on("close", (code) => {
       if (code === 0) {
+        // Trim buffer to keep only the most recent 25%
+        const linesToKeep = Math.ceil(totalLines * SHORT_TERM_RETAIN_RATIO);
+        const retainedLines = lines.slice(-linesToKeep);
+        fs.writeFileSync(SHORT_TERM_MEMORY_FILE, retainedLines.join("\n") + "\n");
+        log(`[Memory] Trimmed buffer from ${totalLines} to ${linesToKeep} lines (kept ${Math.round(SHORT_TERM_RETAIN_RATIO * 100)}%)`);
         resolve();
       } else {
         reject(new Error(`Rollup process exited with code ${code}: ${stderr}`));
