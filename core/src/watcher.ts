@@ -808,7 +808,7 @@ function deleteJob(jobId: string): void {
 // Simple cron event handler (no typing, just accumulate and log)
 class CronEventHandler implements ChannelEventHandler {
   private jobId: string;
-  private textBuffer: string = "";
+  public textBuffer: string = "";
   private isComplete: boolean = false;
 
   constructor(jobId: string) {
@@ -896,6 +896,14 @@ async function handleCronJob(job: CronJob): Promise<void> {
       if (isNewSession) {
         markSessionKnown(sessionId);
       }
+
+      // Log cron output to short-term memory
+      if (handler.textBuffer.trim()) {
+        logToShortTermMemory("cron", "in", `[${job.description}] ${job.prompt}`);
+        logToShortTermMemory("cron", "out", `Assistant: ${handler.textBuffer.trim()}`);
+        checkAndTriggerRollup().catch(err => log(`[Memory] Rollup error: ${err}`));
+      }
+
       resolve();
     });
 
