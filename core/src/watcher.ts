@@ -771,7 +771,7 @@ function scheduleCronJobs(): void {
         job_description: job.description,
         job_prompt: job.prompt,
       });
-    });
+    }, { timezone: "America/Toronto" });
 
     activeCronTasks.set(job.id, task);
     log(`[Cron] Scheduled job: ${job.id} with schedule "${job.schedule}" -> "${cronExpression}"`);

@@ -51,12 +51,20 @@ function saveConfig(config: CronConfig): void {
   fs.writeFileSync(CRON_CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
+// Get current time in Toronto timezone
+function getTorontoNow(): Date {
+  const torontoTime = new Date().toLocaleString("en-US", { timeZone: "America/Toronto" });
+  return new Date(torontoTime);
+}
+
 // Parse delay strings like "in 5 minutes", "in 1 hour", "at 3pm", "at 15:30"
+// All times are interpreted as Toronto time
 function parseDelay(delay: string): Date | null {
   const now = new Date();
+  const torontoNow = getTorontoNow();
   const lower = delay.toLowerCase().trim();
 
-  // "in X minutes/hours/seconds"
+  // "in X minutes/hours/seconds" - relative delays work the same regardless of timezone
   const inMatch = lower.match(/^in\s+(\d+)\s+(second|minute|hour|day)s?$/);
   if (inMatch) {
     const amount = parseInt(inMatch[1]);
@@ -70,7 +78,7 @@ function parseDelay(delay: string): Date | null {
     return new Date(now.getTime() + amount * ms);
   }
 
-  // "at Xam/pm" or "at HH:MM"
+  // "at Xam/pm" or "at HH:MM" - interpret as Toronto time
   const atMatch = lower.match(/^at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
   if (atMatch) {
     let hour = parseInt(atMatch[1]);
@@ -80,14 +88,18 @@ function parseDelay(delay: string): Date | null {
     if (ampm === "pm" && hour < 12) hour += 12;
     if (ampm === "am" && hour === 12) hour = 0;
 
-    const target = new Date(now);
-    target.setHours(hour, minute, 0, 0);
+    // Build target time in Toronto
+    const torontoTarget = new Date(torontoNow);
+    torontoTarget.setHours(hour, minute, 0, 0);
 
-    // If time has passed today, schedule for tomorrow
-    if (target <= now) {
-      target.setDate(target.getDate() + 1);
+    // If time has passed today in Toronto, schedule for tomorrow
+    if (torontoTarget <= torontoNow) {
+      torontoTarget.setDate(torontoTarget.getDate() + 1);
     }
-    return target;
+
+    // Calculate the offset from now to the Toronto target time
+    const msUntilTarget = torontoTarget.getTime() - torontoNow.getTime();
+    return new Date(now.getTime() + msUntilTarget);
   }
 
   return null;
@@ -436,10 +448,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const config = loadConfig();
     const now = new Date().toISOString();
 
+    // Format the time nicely in Toronto timezone
+    const torontoTimeStr = runAt.toLocaleString("en-US", {
+      timeZone: "America/Toronto",
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
     const newJob: CronJob = {
       id: randomUUID().slice(0, 8),
       enabled: true,
-      schedule: `once at ${runAt.toISOString()}`,
+      schedule: `once at ${torontoTimeStr} ET`,
       description,
       prompt,
       created_at: now,
@@ -451,7 +474,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     config.jobs.push(newJob);
     saveConfig(config);
 
-    // Calculate human-readable time
+    // Calculate human-readable time until
     const diffMs = runAt.getTime() - Date.now();
     const diffMins = Math.round(diffMs / 60000);
     const timeStr = diffMins < 60
@@ -462,7 +485,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       content: [
         {
           type: "text",
-          text: `Scheduled one-off task "${newJob.id}":\n• Runs in: ${timeStr} (${runAt.toLocaleTimeString()})\n• Description: ${description}\n\nThis task will auto-delete after it runs.`,
+          text: `Scheduled one-off task "${newJob.id}":\n• Runs in: ${timeStr} (${torontoTimeStr} ET)\n• Description: ${description}\n\nThis task will auto-delete after it runs.`,
         },
       ],
     };
