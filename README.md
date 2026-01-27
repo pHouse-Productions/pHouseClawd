@@ -89,15 +89,65 @@ pHouseClawd/
 │   └── src/
 │       ├── watcher.ts     # Main event processor
 │       └── events.ts      # Event queue system
-├── integrations/
-│   ├── telegram/          # Telegram bot integration
-│   ├── gmail/             # Gmail integration
-│   ├── image-gen/         # Image generation (Gemini)
-│   └── cron/              # Cron job management
+├── listeners/
+│   ├── telegram/          # Telegram message listener daemon
+│   └── gmail/             # Gmail inbox watcher daemon
+├── dashboard/             # Web UI (Next.js)
 ├── memory/                # Conversation history (gitignored)
 ├── notes/                 # Your assistant's notes (gitignored)
 └── logs/                  # Application logs (gitignored)
 ```
+
+## MCP Servers (Tools)
+
+The MCP (Model Context Protocol) servers that give your assistant its capabilities live in a separate repository: **[pHouseMcp](https://github.com/mcarcaso/pHouseMcp)**
+
+This separation keeps the tools modular and shareable. You'll need both repos:
+
+```bash
+# Clone both repos side by side
+git clone https://github.com/pHouse-Productions/pHouseClawd.git
+git clone https://github.com/mcarcaso/pHouseMcp.git
+```
+
+### Setting up MCPs
+
+1. **Install pHouseMcp dependencies:**
+   ```bash
+   cd pHouseMcp
+   npm install
+   ```
+
+2. **Create credentials directory and .env file:**
+   ```bash
+   mkdir -p credentials
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
+
+3. **Add MCP servers to Claude:**
+
+   Edit `~/.claude.json` to add the servers you want. Example for Telegram:
+   ```json
+   {
+     "mcpServers": {
+       "telegram": {
+         "type": "stdio",
+         "command": "npx",
+         "args": ["--prefix", "/path/to/pHouseMcp/servers/telegram", "tsx", "/path/to/pHouseMcp/servers/telegram/src/mcp.ts"]
+       }
+     }
+   }
+   ```
+
+   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `image-gen`, `yahoo-finance`, `cron`, `memory`
+
+4. **For Google services**, you'll need OAuth credentials:
+   - Create a project in Google Cloud Console
+   - Enable the APIs (Gmail, Docs, Sheets, Drive)
+   - Create OAuth 2.0 credentials (Desktop app)
+   - Download as `client_secret.json` to `pHouseMcp/credentials/`
+   - Run the auth flow to generate `tokens.json`
 
 ## Configuration
 
@@ -142,10 +192,16 @@ See `CLAUDE.example.md` for a template.
 Once set up, just run:
 
 ```bash
-./restart.sh
+./start.sh
 ```
 
-This starts all the background processes (watcher, Telegram daemon, etc.) in screen sessions. Run it anytime you need to restart everything.
+This starts all the background processes:
+- Telegram listener daemon
+- Gmail inbox watcher
+- Event watcher (processes incoming messages)
+- Dashboard web server
+
+Press Ctrl+C to stop everything.
 
 ## Dashboard
 
