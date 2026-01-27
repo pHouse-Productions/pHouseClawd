@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { authFetch } from "@/lib/auth";
+import MarkdownRenderer from "../notes/MarkdownRenderer";
 
 interface SkillInfo {
   name: string;
@@ -98,11 +99,7 @@ export default function SkillsPage() {
               </div>
               <div className="p-4 max-h-[600px] overflow-auto">
                 {selectedSkill ? (
-                  <div className="prose prose-invert prose-sm max-w-none">
-                    <pre className="bg-zinc-950 p-4 rounded-lg overflow-auto text-xs text-zinc-300 whitespace-pre-wrap">
-                      {selectedSkill.content}
-                    </pre>
-                  </div>
+                  <MarkdownRenderer content={selectedSkill.content} />
                 ) : (
                   <p className="text-zinc-500">Select a skill to view its details</p>
                 )}

@@ -91,7 +91,7 @@ export default function Sidebar() {
             )}
           </svg>
         </button>
-        <h1 className="text-lg font-bold text-white">Vito Dashboard</h1>
+        <h1 className="text-lg font-bold text-white">AI Dashboard</h1>
         <div className="w-10" /> {/* Spacer for centering */}
       </div>
 
@@ -114,7 +114,7 @@ export default function Sidebar() {
         `}
       >
         <div className="p-6 border-b border-zinc-800">
-          <h1 className="text-xl font-bold text-white">Vito Dashboard</h1>
+          <h1 className="text-xl font-bold text-white">AI Dashboard</h1>
           <p className="text-sm text-zinc-500 mt-1">pHouseClawd</p>
         </div>
         <nav className="flex-1 p-4 overflow-y-auto">

@@ -13,6 +13,7 @@ import {
 } from "./channels/index.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
+import { GChatChannel } from "./channels/gchat.js";
 
 // Load environment variables
 config({ path: "/home/ubuntu/pHouseMcp/.env" });
@@ -47,6 +48,9 @@ const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
 // Email security config
 const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-security.json");
 
+// Channel config
+const CHANNELS_CONFIG_FILE = path.join(PROJECT_ROOT, "config/channels.json");
+
 interface EmailSecurityConfig {
   trustedEmailAddresses: string[];
   alertTelegramChatId: number | null;
@@ -67,6 +71,33 @@ function loadEmailSecurityConfig(): EmailSecurityConfig {
     log(`[Security] Failed to load email security config: ${err}`);
   }
   return { trustedEmailAddresses: [], alertTelegramChatId: null, forwardUntrustedTo: null };
+}
+
+// Channel config types
+interface ChannelConfig {
+  enabled: boolean;
+}
+
+interface ChannelsConfig {
+  channels: Record<string, ChannelConfig>;
+}
+
+function loadChannelsConfig(): ChannelsConfig {
+  try {
+    if (fs.existsSync(CHANNELS_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CHANNELS_CONFIG_FILE, "utf-8"));
+    }
+  } catch (err) {
+    log(`[Channels] Failed to load channels config: ${err}`);
+  }
+  // Default: all channels enabled if no config exists
+  return {
+    channels: {
+      telegram: { enabled: true },
+      email: { enabled: true },
+      gchat: { enabled: true },
+    }
+  };
 }
 
 // Cron job interface
@@ -221,22 +252,35 @@ async function handleChannelEvent(
   log(`[Watcher] Processing event from ${channel.name}: ${sessionKey}`);
   log(`[Watcher] Prompt: ${prompt.slice(0, 100)}...`);
 
-  // Handle special commands for telegram
-  if (channel.name === "telegram" && payload.type === "message") {
+  // Handle special commands for interactive channels (telegram, gchat)
+  if ((channel.name === "telegram" || channel.name === "gchat") && payload.type === "message") {
     const text = payload.text?.trim().toLowerCase();
+
+    // Helper to send a message back to the channel
+    const sendReply = (message: string) => {
+      if (channel.name === "telegram") {
+        const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
+        spawn("npx", ["tsx", sendScript, String(payload.chat_id), message], {
+          cwd: PROJECT_ROOT,
+          stdio: ["ignore", "ignore", "ignore"],
+          detached: true,
+        }).unref();
+      } else if (channel.name === "gchat") {
+        const sendScript = path.join(PROJECT_ROOT, "listeners/gchat/send-message.ts");
+        spawn("npx", ["tsx", sendScript, payload.space_name, message], {
+          cwd: PROJECT_ROOT,
+          stdio: ["ignore", "ignore", "ignore"],
+          detached: true,
+        }).unref();
+      }
+    };
 
     if (text === "/new") {
       clearSession(sessionKey);
       log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
       const handler = channel.createHandler(event);
       handler.onComplete(0);
-      // Send confirmation
-      const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
-      spawn("npx", ["tsx", sendScript, String(payload.chat_id), "Fresh start, boss. New session is ready."], {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
-      }).unref();
+      sendReply("Fresh start, boss. New session is ready.");
       return;
     }
 
@@ -244,12 +288,7 @@ async function handleChannelEvent(
       log(`[Watcher] Restart requested via /restart command`);
       const handler = channel.createHandler(event);
       handler.onComplete(0);
-      const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
-      spawn("npx", ["tsx", sendScript, String(payload.chat_id), "Restarting... Back in a few seconds."], {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
-      }).unref();
+      sendReply("Restarting... Back in a few seconds.");
       spawn(path.join(PROJECT_ROOT, "restart.sh"), [], {
         cwd: PROJECT_ROOT,
         stdio: ["ignore", "ignore", "ignore"],
@@ -662,15 +701,29 @@ function scheduleCronJobs(): void {
 async function watch(): Promise<void> {
   log("[Watcher] Starting unified watcher...");
 
-  // List of channels to start
-  const channels: ChannelDefinition[] = [
+  // Load channel config
+  const channelsConfig = loadChannelsConfig();
+
+  // All available channels
+  const allChannels: ChannelDefinition[] = [
     TelegramChannel,
     EmailChannel,
+    GChatChannel,
   ];
+
+  // Filter to only enabled channels
+  const channels = allChannels.filter(channel => {
+    const config = channelsConfig.channels[channel.name];
+    const enabled = config?.enabled !== false; // Default to enabled if not specified
+    if (!enabled) {
+      log(`[Watcher] Skipping ${channel.name} (disabled in config)`);
+    }
+    return enabled;
+  });
 
   const stopFunctions: (() => void)[] = [];
 
-  // Start all channel listeners
+  // Start enabled channel listeners
   for (const channel of channels) {
     try {
       log(`[Watcher] Starting ${channel.name} listener...`);

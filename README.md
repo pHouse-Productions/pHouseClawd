@@ -6,6 +6,7 @@ A personal AI assistant framework built on Claude Code. Create your own AI assis
 
 - **Telegram Bot** - Chat with your assistant from anywhere
 - **Gmail Integration** - Read and send emails through your assistant
+- **Google Chat Integration** - Chat via Google Chat (requires setup)
 - **Image Generation** - Generate and edit images using Gemini
 - **Scheduled Tasks** - Cron jobs for recurring tasks (daily briefings, reminders, etc.)
 - **Web Browsing** - Playwright-powered web automation
@@ -69,6 +70,10 @@ Claude will:
 - Run the authentication flow
 - Configure the Gmail MCP server
 
+**Google Chat (optional):**
+- Requires Google Workspace or personal Gmail with Chat enabled
+- See "Google Chat Setup" section below for detailed steps
+
 **Image Generation (optional):**
 - Get an OpenRouter API key
 - Configure the image generation MCP server
@@ -84,14 +89,16 @@ pHouseClawd/
 ├── CLAUDE.md              # Your assistant's personality and instructions
 ├── config/
 │   ├── cron.json          # Scheduled tasks
-│   └── email-security.json # Email security settings
+│   ├── email-security.json # Email security settings
+│   └── gchat-security.json # Google Chat security settings
 ├── core/
 │   └── src/
 │       ├── watcher.ts     # Main event processor
 │       └── events.ts      # Event queue system
 ├── listeners/
 │   ├── telegram/          # Telegram message listener daemon
-│   └── gmail/             # Gmail inbox watcher daemon
+│   ├── gmail/             # Gmail inbox watcher daemon
+│   └── gchat/             # Google Chat listener
 ├── dashboard/             # Web UI (Next.js)
 ├── memory/                # Conversation history (gitignored)
 ├── notes/                 # Your assistant's notes (gitignored)
@@ -140,7 +147,25 @@ git clone https://github.com/mcarcaso/pHouseMcp.git
    }
    ```
 
-   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `image-gen`, `yahoo-finance`, `cron`, `memory`
+   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `google-calendar`, `image-gen`, `yahoo-finance`, `cron`, `memory`, `pdf`
+
+### Recommended Third-Party MCP
+
+For web browsing and automation, we recommend the **Playwright MCP**:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@playwright/mcp", "--headless"]
+    }
+  }
+}
+```
+
+This gives your assistant the ability to browse websites, take screenshots, fill forms, and automate web tasks. It's well-maintained and works great out of the box.
 
 4. **For Google services**, you'll need OAuth credentials:
    - Create a project in Google Cloud Console
@@ -160,6 +185,7 @@ All configuration is managed by Claude through JSON files in the `config/` direc
 | `CLAUDE.md` | Your assistant's personality, your info, preferences |
 | `config/cron.json` | Scheduled tasks and reminders |
 | `config/email-security.json` | Trusted email addresses for auto-reply |
+| `config/gchat-security.json` | Whitelisted Google Chat spaces |
 
 **Example commands:**
 - "Add john@example.com to my trusted email list"
@@ -176,6 +202,119 @@ To add trusted email addresses, just tell Claude:
 > "Trust emails from mywork@company.com"
 
 This prevents your assistant from responding to spam, phishing attempts, or impersonators.
+
+## Google Chat Setup
+
+Google Chat integration requires more setup than other channels. Here's the complete process:
+
+### Prerequisites
+- Google Cloud project (same one used for Gmail/Docs/etc)
+- OAuth credentials with Chat scopes
+- Google Chat enabled on your Google account
+
+### Step 1: Enable Google Chat on Your Account
+
+1. Go to [Gmail Settings](https://mail.google.com/mail/u/0/#settings/chat)
+2. Under "Chat and Meet" tab, set Google Chat to **On**
+3. Or visit [chat.google.com](https://chat.google.com) and accept the terms
+
+### Step 2: Enable the Google Chat API
+
+1. Go to [Google Cloud Console - Chat API](https://console.cloud.google.com/apis/library/chat.googleapis.com)
+2. Select your project
+3. Click **Enable**
+
+### Step 3: Configure a Chat App (Required)
+
+Even though we're using user authentication, Google requires a Chat app to be configured:
+
+1. Go to [Chat API Configuration](https://console.cloud.google.com/apis/api/chat.googleapis.com/hangouts-chat)
+2. Fill in the required fields:
+   - **App name**: e.g., "My Assistant"
+   - **Avatar URL**: (optional)
+   - **Description**: e.g., "Personal AI assistant"
+3. Under **Functionality**, you can leave defaults (we don't use webhooks/triggers)
+4. Under **Visibility**, select your preference
+5. Click **Save**
+
+### Step 4: Add Chat Scopes to OAuth
+
+Your OAuth token needs these scopes:
+- `https://www.googleapis.com/auth/chat.spaces`
+- `https://www.googleapis.com/auth/chat.messages`
+- `https://www.googleapis.com/auth/chat.memberships`
+
+If you already have a `tokens.json`, you may need to re-run the OAuth flow to add these scopes.
+
+### Step 5: Start a Conversation and Accept the Chat
+
+1. Go to [chat.google.com](https://chat.google.com)
+2. Start a DM with your assistant's Google account
+3. Send a message
+4. **Important**: Log into your assistant's Google account and **accept the chat invite** - the assistant cannot respond until the chat is accepted on both sides
+
+### Step 6: Get Your Space ID
+
+Run the test script to find your space ID:
+
+```bash
+cd listeners/gchat
+npx tsx test-api.ts
+```
+
+This will list all spaces and their IDs (format: `spaces/XXXXXXXXX`).
+
+### Step 7: Find Your Bot's User ID
+
+Run the member listing script to find your bot's user ID:
+
+```bash
+cd listeners/gchat
+npx tsx list-members.ts spaces/XXXXXXXXX
+```
+
+This shows all members with their user IDs. The bot account is the one that joined after you initiated the chat.
+
+### Step 8: Configure Security Settings
+
+Add the space ID and your bot's user ID to `config/gchat-security.json`:
+
+```json
+{
+  "allowedSpaces": ["spaces/XXXXXXXXX"],
+  "myUserId": "users/YYYYYYYYY"
+}
+```
+
+The `myUserId` field prevents the bot from responding to its own messages (which would cause an infinite loop).
+
+### Step 9: Restart the Watcher
+
+```bash
+./restart.sh
+```
+
+Your assistant will now respond to messages in the whitelisted Google Chat space.
+
+### Troubleshooting
+
+**"Google Chat is turned off"**
+- Enable Google Chat in your Gmail settings or visit chat.google.com
+
+**"Google Chat app not found"**
+- You need to configure a Chat app in the Cloud Console (Step 3)
+
+**"Permission denied" when sending messages**
+- Make sure the chat has been accepted on both sides
+- Verify you have the `chat.messages` scope in your OAuth token
+
+**Empty spaces list**
+- Google Chat only shows spaces after the first message is sent
+- Send a message first, then run the test script
+
+**Bot responds to itself (infinite loop)**
+- Make sure `myUserId` is set in `config/gchat-security.json`
+- Run `npx tsx list-members.ts` to find the correct user ID
 
 ## Customization
 
@@ -198,6 +337,7 @@ Once set up, just run:
 This starts all the background processes:
 - Telegram listener daemon
 - Gmail inbox watcher
+- Google Chat listener (if configured)
 - Event watcher (processes incoming messages)
 - Dashboard web server
 

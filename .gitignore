@@ -11,6 +11,7 @@ dist/
 CLAUDE.md
 config/cron.json
 config/email-security.json
+config/channels.json
 
 # Gmail state file
 listeners/gmail/last_history_id.txt
