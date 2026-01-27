@@ -135,9 +135,12 @@ if (!fs.existsSync(LOGS_DIR)) {
 }
 
 // Session management
+type ChannelMode = "session" | "transcript";
+
 interface SessionData {
   known: string[];
   generations: Record<string, number>;
+  modes: Record<string, ChannelMode>; // Per-channel mode (session vs transcript)
 }
 
 function loadSessionData(): SessionData {
@@ -145,12 +148,22 @@ function loadSessionData(): SessionData {
     if (fs.existsSync(SESSIONS_FILE)) {
       const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf-8"));
       if (Array.isArray(data)) {
-        return { known: data, generations: {} };
+        return { known: data, generations: {}, modes: {} };
       }
-      return data;
+      return { ...data, modes: data.modes || {} };
     }
   } catch {}
-  return { known: [], generations: {} };
+  return { known: [], generations: {}, modes: {} };
+}
+
+function getChannelMode(sessionKey: string): ChannelMode {
+  return loadSessionData().modes[sessionKey] || "session"; // Default to session mode
+}
+
+function setChannelMode(sessionKey: string, mode: ChannelMode): void {
+  const data = loadSessionData();
+  data.modes[sessionKey] = mode;
+  saveSessionData(data);
 }
 
 function saveSessionData(data: SessionData): void {
@@ -229,6 +242,26 @@ function getShortTermMemorySize(): number {
     }
   } catch {}
   return 0;
+}
+
+// Get recent messages from short-term memory for transcript mode injection
+const TRANSCRIPT_CONTEXT_LINES = 30; // Last 30 messages
+
+function getRecentTranscriptContext(): string {
+  try {
+    if (!fs.existsSync(SHORT_TERM_MEMORY_FILE)) {
+      return "";
+    }
+    const content = fs.readFileSync(SHORT_TERM_MEMORY_FILE, "utf-8");
+    const lines = content.trim().split("\n").filter(l => l.trim());
+    const recentLines = lines.slice(-TRANSCRIPT_CONTEXT_LINES);
+    if (recentLines.length === 0) {
+      return "";
+    }
+    return `\n\n--- RECENT CONVERSATION HISTORY (from all channels) ---\n${recentLines.join("\n")}\n--- END HISTORY ---\n\n`;
+  } catch {
+    return "";
+  }
 }
 
 // Track if rollup is in progress to avoid concurrent rollups
@@ -476,6 +509,29 @@ async function handleChannelEvent(
       }).unref();
       return;
     }
+
+    // Mode switching commands
+    if (text === "/mode session" || text === "/mode transcript") {
+      const newMode = text === "/mode session" ? "session" : "transcript";
+      setChannelMode(sessionKey, newMode);
+      log(`[Watcher] Mode changed to ${newMode} for ${sessionKey}`);
+      const handler = channel.createHandler(event);
+      handler.onComplete(0);
+      if (newMode === "session") {
+        sendReply("Switched to session mode. I'll remember our conversation within this session.");
+      } else {
+        sendReply("Switched to transcript mode. Each message is a fresh session, but I'll see recent history from all channels.");
+      }
+      return;
+    }
+
+    if (text === "/mode") {
+      const currentMode = getChannelMode(sessionKey);
+      const handler = channel.createHandler(event);
+      handler.onComplete(0);
+      sendReply(`Current mode: ${currentMode}\n\nUse /mode session or /mode transcript to switch.`);
+      return;
+    }
   }
 
   // Email security check
@@ -516,21 +572,36 @@ async function handleChannelEvent(
     }
   }
 
+  // Check channel mode
+  const channelMode = getChannelMode(sessionKey);
+  const isTranscriptMode = channelMode === "transcript";
+
   // Generate session ID
   const generation = getSessionGeneration(sessionKey);
   const sessionId = generateSessionId(`${sessionKey}-gen${generation}`);
   const knownSessions = getKnownSessions();
   const isNewSession = !knownSessions.has(sessionId);
 
+  // In transcript mode, inject recent history into the prompt
+  if (isTranscriptMode) {
+    const recentHistory = getRecentTranscriptContext();
+    if (recentHistory) {
+      finalPrompt = recentHistory + finalPrompt;
+    }
+  }
+
   // Create handler for this event
   const handler = channel.createHandler(event);
 
   // Spawn Claude
-  return new Promise((resolve, reject) => {
-    log(`[Watcher] Spawning Claude with session ${sessionId} (${isNewSession ? "new" : "resuming"})`);
+  // In transcript mode: always new session. In session mode: resume if exists.
+  const useNewSession = isTranscriptMode || isNewSession;
 
-    const sessionArg = isNewSession
-      ? ["--session-id", sessionId]
+  return new Promise((resolve, reject) => {
+    log(`[Watcher] Spawning Claude with session ${sessionId} (mode: ${channelMode}, ${useNewSession ? "new" : "resuming"})`);
+
+    const sessionArg = useNewSession
+      ? ["--session-id", isTranscriptMode ? generateSessionId(`${sessionKey}-transcript-${Date.now()}`) : sessionId]
       : ["--resume", sessionId];
 
     const proc = spawn(
@@ -604,7 +675,8 @@ async function handleChannelEvent(
         reject(new Error(stderr));
       } else {
         log(`[Watcher] Claude finished handling event successfully`);
-        if (isNewSession) {
+        // Only track session mode sessions, not transcript mode (those are one-off)
+        if (isNewSession && !isTranscriptMode) {
           markSessionKnown(sessionId);
           log(`[Watcher] Marked session ${sessionId} as known`);
         }
