@@ -27,12 +27,19 @@ export interface EmailConfig {
 export class EmailChannel implements Channel {
   private config: EmailConfig;
   private textBuffer: string = "";
+  private isComplete: boolean = false;
 
   constructor(config: EmailConfig) {
     this.config = config;
   }
 
   onStreamEvent(event: StreamEvent): void {
+    // Check for result event - this means Claude is done
+    if (event.type === "result") {
+      this.onComplete(event.subtype === "success" ? 0 : 1);
+      return;
+    }
+
     // Email uses "final" verbosity - just accumulate text
     const text = this.extractText(event);
     if (text) {
@@ -41,6 +48,10 @@ export class EmailChannel implements Channel {
   }
 
   onComplete(code: number): void {
+    // Guard against being called multiple times
+    if (this.isComplete) return;
+    this.isComplete = true;
+
     // Send the accumulated response as an email reply
     if (this.textBuffer.trim()) {
       this.sendEmailReply(this.textBuffer.trim());
