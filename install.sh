@@ -226,7 +226,61 @@ echo "  Credentials: $GOOGLE_CREDS_PATH"
 echo "  Token: $GOOGLE_TOKEN_PATH"
 
 # ============================================
-# Step 9: Create pHouseClawd systemd service
+# Step 9: Configure MCP servers in ~/.claude.json
+# ============================================
+print_step "Configuring MCP servers..."
+
+CLAUDE_CONFIG="$HOME/.claude.json"
+MCP_SERVERS_DIR="$PARENT_DIR/pHouseMcp/servers"
+
+# Create ~/.claude.json if it doesn't exist
+if [ ! -f "$CLAUDE_CONFIG" ]; then
+    echo '{}' > "$CLAUDE_CONFIG"
+fi
+
+# Build MCP config for each server in pHouseMcp/servers/
+MCP_CONFIG="{}"
+for server_dir in "$MCP_SERVERS_DIR"/*/; do
+    if [ -d "$server_dir" ]; then
+        server_name=$(basename "$server_dir")
+        server_path="$MCP_SERVERS_DIR/$server_name"
+        mcp_entry=$(cat <<MCPEOF
+{
+  "type": "stdio",
+  "command": "npx",
+  "args": ["--prefix", "$server_path", "tsx", "$server_path/src/mcp.ts"],
+  "env": {}
+}
+MCPEOF
+)
+        MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --arg name "$server_name" --argjson entry "$mcp_entry" '.[$name] = $entry')
+        echo "  Added: $server_name"
+    fi
+done
+
+# Add Playwright MCP (third-party, commonly used)
+PLAYWRIGHT_ENTRY='{"type": "stdio", "command": "npx", "args": ["@playwright/mcp", "--headless"], "env": {}}'
+MCP_CONFIG=$(echo "$MCP_CONFIG" | jq --argjson entry "$PLAYWRIGHT_ENTRY" '.playwright = $entry')
+echo "  Added: playwright (third-party)"
+
+# Merge into ~/.claude.json, preserving existing config
+# Only add servers that don't already exist
+EXISTING_SERVERS=$(jq -r '.mcpServers // {} | keys[]' "$CLAUDE_CONFIG" 2>/dev/null || echo "")
+for server in $(echo "$MCP_CONFIG" | jq -r 'keys[]'); do
+    if echo "$EXISTING_SERVERS" | grep -q "^${server}$"; then
+        echo "  Skipped: $server (already configured)"
+        MCP_CONFIG=$(echo "$MCP_CONFIG" | jq "del(.[\"$server\"])")
+    fi
+done
+
+# Merge the new servers into the config
+jq --argjson newServers "$MCP_CONFIG" '.mcpServers = (.mcpServers // {}) + $newServers' "$CLAUDE_CONFIG" > "$CLAUDE_CONFIG.tmp"
+mv "$CLAUDE_CONFIG.tmp" "$CLAUDE_CONFIG"
+
+echo "MCP servers configured in ~/.claude.json"
+
+# ============================================
+# Step 10: Create pHouseClawd systemd service
 # ============================================
 print_step "Setting up pHouseClawd systemd service..."
 
@@ -252,7 +306,7 @@ sudo systemctl enable phouseclawd
 echo "pHouseClawd service enabled (will start on boot)."
 
 # ============================================
-# Step 10: Authenticate GitHub CLI (Optional)
+# Step 11: Authenticate GitHub CLI (Optional)
 # ============================================
 echo ""
 print_step "GitHub CLI Authentication (Optional)"
@@ -271,7 +325,7 @@ else
 fi
 
 # ============================================
-# Step 11: Authenticate Claude Code
+# Step 12: Authenticate Claude Code
 # ============================================
 echo ""
 print_step "Claude Code Authentication"
@@ -284,7 +338,7 @@ claude --dangerously-skip-permissions || {
 }
 
 # ============================================
-# Step 12: SSL Setup
+# Step 13: SSL Setup
 # ============================================
 echo ""
 echo "=============================================="
