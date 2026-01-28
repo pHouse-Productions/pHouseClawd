@@ -169,7 +169,7 @@ if [ -d "dashboard" ]; then
     echo "(Stored in dashboard/.env.local)"
     echo ""
 
-    npm run build && cd ..
+    cd ..
 fi
 
 # Listeners
