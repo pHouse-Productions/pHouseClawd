@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Assistant Dashboard",
-  description: "pHouseClawd Personal AI Assistant Dashboard",
+  title: "pHouse AI Assistant",
+  description: "AI assistant platform with multi-channel communication, scheduled jobs, and persistent memory",
 };
 
 export const viewport: Viewport = {

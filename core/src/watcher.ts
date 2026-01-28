@@ -215,8 +215,12 @@ function getSessionGeneration(sessionKey: string): number {
 
 // Concurrency tracking
 const activeSessions: Set<string> = new Set();
+// Track which job ID currently owns each session lock
+const sessionOwners: Map<string, string> = new Map();
 const globalLocks: Map<string, boolean> = new Map();
 const eventQueues: Map<string, ChannelEvent[]> = new Map();
+// Mutex locks to prevent race conditions when checking/modifying activeSessions
+const sessionMutexes: Map<string, Promise<void>> = new Map();
 
 function log(message: string) {
   const timestamp = new Date().toISOString();
@@ -393,19 +397,48 @@ function getShortTermMemorySize(): number {
 
 // Get recent messages from short-term memory for transcript mode injection
 const TRANSCRIPT_CONTEXT_LINES = 30; // Last 30 messages
+const LONG_TERM_MEMORY_DIR = path.join(PROJECT_ROOT, "memory/long-term");
+
+function getMemoryFilesInfo(): string {
+  try {
+    const files: string[] = [];
+    if (fs.existsSync(LONG_TERM_MEMORY_DIR)) {
+      for (const file of fs.readdirSync(LONG_TERM_MEMORY_DIR)) {
+        if (file.endsWith(".md")) {
+          files.push(file);
+        }
+      }
+    }
+    if (files.length === 0) {
+      return "";
+    }
+    return `## Memory Available
+**Long-term memory files:** ${files.join(", ")}
+Use the \`recall\` MCP tool to read any of these (e.g., \`recall(file="journal.md")\`).
+
+**Short-term memory:** More conversation history is available in the buffer.
+Use \`read_short_term\` to see it, or \`search_memory\` to search across all memory.
+
+`;
+  } catch {
+    return "";
+  }
+}
 
 function getRecentTranscriptContext(): string {
   try {
+    const memoryInfo = getMemoryFilesInfo();
+
     if (!fs.existsSync(SHORT_TERM_MEMORY_FILE)) {
-      return "";
+      return memoryInfo ? `\n\n${memoryInfo}` : "";
     }
     const content = fs.readFileSync(SHORT_TERM_MEMORY_FILE, "utf-8");
     const lines = content.trim().split("\n").filter(l => l.trim());
     const recentLines = lines.slice(-TRANSCRIPT_CONTEXT_LINES);
     if (recentLines.length === 0) {
-      return "";
+      return memoryInfo ? `\n\n${memoryInfo}` : "";
     }
-    return `\n\n--- RECENT CONVERSATION HISTORY (from all channels) ---\n${recentLines.join("\n")}\n--- END HISTORY ---\n\n`;
+    return `\n\n${memoryInfo}--- RECENT CONVERSATION HISTORY (from all channels) ---\n${recentLines.join("\n")}\n--- END HISTORY ---\n\n`;
   } catch {
     return "";
   }
@@ -906,6 +939,26 @@ async function handleChannelEvent(
   });
 }
 
+// Helper to acquire a mutex for a session key
+async function acquireSessionMutex(lockKey: string): Promise<() => void> {
+  // Wait for any existing operation on this session to complete
+  while (sessionMutexes.has(lockKey)) {
+    await sessionMutexes.get(lockKey);
+  }
+
+  // Create a new mutex for this operation
+  let releaseMutex: () => void;
+  const mutexPromise = new Promise<void>((resolve) => {
+    releaseMutex = resolve;
+  });
+  sessionMutexes.set(lockKey, mutexPromise);
+
+  return () => {
+    sessionMutexes.delete(lockKey);
+    releaseMutex!();
+  };
+}
+
 // Process event with concurrency control
 async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Promise<void> {
   const { sessionKey, payload } = event;
@@ -963,71 +1016,106 @@ async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Pr
     }
   }
 
-  // Check concurrency
+  // Check concurrency - use mutex to prevent race conditions when two messages arrive simultaneously
   if (channel.concurrency === "session" || channel.concurrency === "global") {
-    if (activeSessions.has(lockKey)) {
-      // Check queue mode for this session
-      const queueMode = getQueueMode(sessionKey);
+    // Acquire mutex before checking/modifying session state
+    const releaseMutex = await acquireSessionMutex(lockKey);
 
-      if (queueMode === "interrupt") {
-        // Interrupt mode: kill current job, clear queue, process this one
-        log(`[Watcher] Interrupt mode: killing running job for ${lockKey}`);
+    try {
+      if (activeSessions.has(lockKey)) {
+        // Check queue mode for this session
+        const queueMode = getQueueMode(sessionKey);
 
-        // Kill the running job for this session
-        const runningJobId = getRunningJobForSession(sessionKey);
-        if (runningJobId) {
-          killJob(runningJobId);
-          log(`[Watcher] Killed job ${runningJobId} due to interrupt mode`);
-        }
+        if (queueMode === "interrupt") {
+          // Interrupt mode: kill current job, clear queue, process this one
+          log(`[Watcher] Interrupt mode: killing running job for ${lockKey}`);
 
-        // Clear any queued events for this session
-        const queue = eventQueues.get(lockKey);
-        if (queue && queue.length > 0) {
-          log(`[Watcher] Clearing ${queue.length} queued events due to interrupt mode`);
-          eventQueues.delete(lockKey);
-        }
+          // Kill the running job for this session and wait for it to fully terminate
+          const runningJobId = getRunningJobForSession(sessionKey);
+          if (runningJobId) {
+            const proc = runningJobs.get(runningJobId);
+            if (proc) {
+              // Create a promise that resolves when the process actually exits
+              const exitPromise = new Promise<void>((resolve) => {
+                const onExit = () => {
+                  proc.removeListener("close", onExit);
+                  proc.removeListener("exit", onExit);
+                  resolve();
+                };
+                proc.once("close", onExit);
+                proc.once("exit", onExit);
 
-        // Wait a tiny bit for the kill to complete, then continue
-        // The activeSessions will be cleared by the killed job's finally block
-        // So we need to wait for that before we can proceed
-        await new Promise(resolve => setTimeout(resolve, 100));
+                // Timeout fallback - don't wait forever
+                setTimeout(() => {
+                  proc.removeListener("close", onExit);
+                  proc.removeListener("exit", onExit);
+                  resolve();
+                }, 2000);
+              });
 
-        // Now check again - if still active, wait a bit more
-        if (activeSessions.has(lockKey)) {
-          log(`[Watcher] Waiting for interrupted job to clean up...`);
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
+              proc.kill("SIGTERM");
+              log(`[Watcher] Sent SIGTERM to job ${runningJobId}, waiting for exit...`);
 
-        // If STILL active (shouldn't happen), force clean up
-        if (activeSessions.has(lockKey)) {
-          log(`[Watcher] Force clearing active session lock for ${lockKey}`);
+              await exitPromise;
+              log(`[Watcher] Job ${runningJobId} terminated`);
+
+              // Now finalize the job if it hasn't been already
+              if (runningJobs.has(runningJobId)) {
+                finalizeJob(runningJobId, "stopped");
+              }
+            }
+          }
+
+          // Clear any queued events for this session
+          const queue = eventQueues.get(lockKey);
+          if (queue && queue.length > 0) {
+            log(`[Watcher] Clearing ${queue.length} queued events due to interrupt mode`);
+            eventQueues.delete(lockKey);
+          }
+
+          // Force clear the session lock since we're taking over
           activeSessions.delete(lockKey);
+          sessionOwners.delete(lockKey);
+        } else {
+          // Queue mode: queue this event
+          if (!eventQueues.has(lockKey)) {
+            eventQueues.set(lockKey, []);
+          }
+          eventQueues.get(lockKey)!.push(event);
+          log(`[Watcher] Queued event for ${lockKey} (${eventQueues.get(lockKey)!.length} in queue)`);
+          releaseMutex();
+          return;
         }
-      } else {
-        // Queue mode: queue this event
-        if (!eventQueues.has(lockKey)) {
-          eventQueues.set(lockKey, []);
-        }
-        eventQueues.get(lockKey)!.push(event);
-        log(`[Watcher] Queued event for ${lockKey} (${eventQueues.get(lockKey)!.length} in queue)`);
-        return;
       }
+      activeSessions.add(lockKey);
+    } finally {
+      releaseMutex();
     }
-    activeSessions.add(lockKey);
   }
+
+  // Generate a unique ownership token for this invocation
+  const ownershipToken = crypto.randomUUID();
+  sessionOwners.set(lockKey, ownershipToken);
 
   try {
     await handleChannelEvent(channel, event);
   } finally {
     if (channel.concurrency === "session" || channel.concurrency === "global") {
-      activeSessions.delete(lockKey);
+      // Only release the lock if we still own it
+      // This prevents a killed job from releasing the lock that a new job now owns
+      if (sessionOwners.get(lockKey) === ownershipToken) {
+        activeSessions.delete(lockKey);
+        sessionOwners.delete(lockKey);
 
-      // Process next queued event if any
-      const queue = eventQueues.get(lockKey);
-      if (queue && queue.length > 0) {
-        const nextEvent = queue.shift()!;
-        log(`[Watcher] Processing next queued event for ${lockKey}`);
-        setImmediate(() => processEvent(channel, nextEvent));
+        // Process next queued event if any
+        const queue = eventQueues.get(lockKey);
+        if (queue && queue.length > 0) {
+          const nextEvent = queue.shift()!;
+          log(`[Watcher] Processing next queued event for ${lockKey}`);
+          setImmediate(() => processEvent(channel, nextEvent));
+        }
+      } else {
+        log(`[Watcher] Skipping cleanup - lock ownership transferred (was killed by interrupt)`);
       }
     }
   }
