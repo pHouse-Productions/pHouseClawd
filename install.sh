@@ -43,6 +43,13 @@ git config --global user.name "$ASSISTANT_NAME"
 git config --global user.email "${ASSISTANT_NAME,,}@phouse.bot"
 echo "Git configured as: $ASSISTANT_NAME <${ASSISTANT_NAME,,}@phouse.bot>"
 
+# Seed CLAUDE.md from template if it doesn't exist
+if [ ! -f "$SCRIPT_DIR/CLAUDE.md" ]; then
+    print_step "Creating CLAUDE.md for $ASSISTANT_NAME..."
+    sed "s/{ASSISTANT_NAME}/$ASSISTANT_NAME/g" "$SCRIPT_DIR/CLAUDE.md.template" > "$SCRIPT_DIR/CLAUDE.md"
+    echo "Created CLAUDE.md - your assistant will run onboarding on first conversation."
+fi
+
 # ============================================
 # Step 2: System Dependencies
 # ============================================

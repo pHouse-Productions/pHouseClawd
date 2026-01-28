@@ -1,46 +1,26 @@
 #!/bin/bash
 
-# Start the pHouseClawd system
-# The unified watcher handles all channels (Telegram, Email) and cron jobs
+# Start the full pHouseClawd system (watcher + dashboard)
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 echo "Starting pHouseClawd..."
 
-# Cleanup function
-cleanup() {
-  echo ""
-  echo "Shutting down pHouseClawd..."
-  kill $WATCHER_PID $DASHBOARD_PID 2>/dev/null
-  wait
-  echo "Goodbye!"
-  exit 0
-}
+# Ensure logs directory exists
+mkdir -p logs
 
-# Set trap BEFORE starting background processes
-trap cleanup SIGINT SIGTERM EXIT
+# Start watcher first (fast)
+"$SCRIPT_DIR/watcher-start.sh"
 
-# Start the unified event watcher (handles Telegram, Email, Cron)
-echo "Starting unified watcher..."
-npx tsx core/src/watcher.ts &
-WATCHER_PID=$!
-
-# Give it a moment to connect
-sleep 2
-
-# Build and start dashboard in production mode
-echo "Building dashboard..."
-cd dashboard && npm run build && npm run start -- -p 3000 &
-DASHBOARD_PID=$!
-cd ..
+# Start dashboard (slow, runs in background)
+"$SCRIPT_DIR/dashboard-start.sh"
 
 echo ""
-echo "pHouseClawd is running. Press Ctrl+C to stop."
-echo "  Watcher PID:   $WATCHER_PID"
-echo "  Dashboard PID: $DASHBOARD_PID"
+echo "pHouseClawd is running."
 echo ""
-echo "Dashboard: http://localhost:3000"
+echo "Commands:"
+echo "  ./watcher-restart.sh   - Restart just the watcher"
+echo "  ./dashboard-restart.sh - Restart just the dashboard"
+echo "  ./kill.sh              - Stop everything"
 echo ""
-
-# Wait for any child to exit
-wait
