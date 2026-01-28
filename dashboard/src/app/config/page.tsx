@@ -732,10 +732,10 @@ export default function ConfigPage() {
               </div>
               {channel === "gchat" && settings.enabled && (
                 <div className="mt-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded text-xs text-yellow-200">
-                  <p className="font-medium mb-1">Setup required:</p>
+                  <p className="font-medium mb-1">Setup required (on the assistant&apos;s Google account):</p>
                   <ol className="list-decimal list-inside space-y-1 text-yellow-200/80">
-                    <li>Enable Google Chat in your Google Workspace account</li>
-                    <li>Send a message to the assistant - you&apos;ll need to accept a prompt in the Google Chat UI to start the conversation</li>
+                    <li>Log into the assistant&apos;s Google account and enable Google Chat in Workspace settings</li>
+                    <li>From your own account, send a message to the assistant - you&apos;ll need to accept a prompt in the Google Chat UI to start the conversation</li>
                   </ol>
                 </div>
               )}
