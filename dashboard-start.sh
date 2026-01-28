@@ -10,13 +10,10 @@ if fuser 3000/tcp > /dev/null 2>&1; then
     exit 1
 fi
 
-echo "Starting dashboard..."
+echo "Building dashboard..."
+cd dashboard && npm run build && cd ..
 
-# Check if build exists and is recent
-if [ ! -d "dashboard/.next" ]; then
-    echo "No build found, building dashboard first..."
-    cd dashboard && npm run build && cd ..
-fi
+echo "Starting dashboard..."
 
 cd dashboard
 nohup npm run start -- -p 3000 > ../logs/dashboard.log 2>&1 &
