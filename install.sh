@@ -188,20 +188,42 @@ for listener in listeners/*/; do
 done
 
 # ============================================
-# Step 8: Create pHouseMcp credentials directory
+# Step 8: Create pHouseMcp credentials directory and configure paths
 # ============================================
 print_step "Setting up pHouseMcp credentials directory..."
 mkdir -p "$PARENT_DIR/pHouseMcp/credentials"
 
+MCP_CREDENTIALS_DIR="$PARENT_DIR/pHouseMcp/credentials"
+GOOGLE_CREDS_PATH="$MCP_CREDENTIALS_DIR/client_secret.json"
+GOOGLE_TOKEN_PATH="$MCP_CREDENTIALS_DIR/tokens.json"
+
 if [ ! -f "$PARENT_DIR/pHouseMcp/.env" ]; then
     if [ -f "$PARENT_DIR/pHouseMcp/.env.example" ]; then
         cp "$PARENT_DIR/pHouseMcp/.env.example" "$PARENT_DIR/pHouseMcp/.env"
-        echo "Created .env from .env.example - you'll need to fill in your API keys."
+        echo "Created .env from .env.example"
     else
         touch "$PARENT_DIR/pHouseMcp/.env"
         echo "Created empty .env file."
     fi
 fi
+
+# Update Google credential paths in .env to use correct absolute paths
+print_step "Configuring Google credential paths..."
+MCP_ENV="$PARENT_DIR/pHouseMcp/.env"
+
+# Remove any existing GOOGLE_CREDENTIALS_PATH and GOOGLE_TOKEN_PATH lines
+sed -i '/^GOOGLE_CREDENTIALS_PATH=/d' "$MCP_ENV"
+sed -i '/^GOOGLE_TOKEN_PATH=/d' "$MCP_ENV"
+
+# Add the correct paths
+echo "" >> "$MCP_ENV"
+echo "# Google OAuth Credentials (auto-configured by install script)" >> "$MCP_ENV"
+echo "GOOGLE_CREDENTIALS_PATH=$GOOGLE_CREDS_PATH" >> "$MCP_ENV"
+echo "GOOGLE_TOKEN_PATH=$GOOGLE_TOKEN_PATH" >> "$MCP_ENV"
+
+echo "Google credential paths configured:"
+echo "  Credentials: $GOOGLE_CREDS_PATH"
+echo "  Token: $GOOGLE_TOKEN_PATH"
 
 # ============================================
 # Step 9: Create pHouseClawd systemd service
