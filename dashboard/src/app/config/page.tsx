@@ -41,6 +41,10 @@ interface ConfigData {
     trustedEmailAddresses: string[];
     alertTelegramChatId: number | null;
   } | null;
+  gchatSecurity: {
+    allowedSpaces: string[];
+    myUserId: string;
+  } | null;
   claudeMd: string;
 }
 
@@ -581,6 +585,25 @@ export default function ConfigPage() {
     }
   };
 
+  const saveGchatSecurity = async (gchatSecurity: { allowedSpaces: string[]; myUserId: string }) => {
+    try {
+      const res = await authFetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "gchatSecurity", data: gchatSecurity }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showMessage("success", data.message);
+        fetchConfig();
+      } else {
+        showMessage("error", data.error || "Failed to save");
+      }
+    } catch (err) {
+      showMessage("error", String(err));
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -731,12 +754,19 @@ export default function ConfigPage() {
                 </button>
               </div>
               {channel === "gchat" && settings.enabled && (
-                <div className="mt-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded text-xs text-yellow-200">
-                  <p className="font-medium mb-1">Setup required (on the assistant&apos;s Google account):</p>
-                  <ol className="list-decimal list-inside space-y-1 text-yellow-200/80">
-                    <li>Log into the assistant&apos;s Google account and enable Google Chat in Workspace settings</li>
-                    <li>From your own account, send a message to the assistant - you&apos;ll need to accept a prompt in the Google Chat UI to start the conversation</li>
-                  </ol>
+                <div className="mt-3 space-y-3">
+                  <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded text-xs text-yellow-200">
+                    <p className="font-medium mb-1">Setup required (on the assistant&apos;s Google account):</p>
+                    <ol className="list-decimal list-inside space-y-1 text-yellow-200/80">
+                      <li>Log into the assistant&apos;s Google account and enable Google Chat in Workspace settings</li>
+                      <li>From your own account, send a message to the assistant - you&apos;ll need to accept a prompt in the Google Chat UI to start the conversation</li>
+                      <li>Run <code className="bg-zinc-800 px-1 rounded">npx tsx listeners/gchat/test-api.ts</code> to find your space ID</li>
+                    </ol>
+                  </div>
+                  <GChatSecurityEditor
+                    config={config.gchatSecurity || { allowedSpaces: [], myUserId: "" }}
+                    onSave={saveGchatSecurity}
+                  />
                 </div>
               )}
             </div>
@@ -922,6 +952,113 @@ function ClaudeMdEditor({
         className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-600 font-mono"
       />
       <div className="flex gap-2 mt-2">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded disabled:opacity-50"
+        >
+          {saving ? "..." : "Save"}
+        </button>
+        <button
+          onClick={() => setEditing(false)}
+          className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-white text-sm rounded"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GChatSecurityEditor({
+  config,
+  onSave,
+}: {
+  config: { allowedSpaces: string[]; myUserId: string };
+  onSave: (config: { allowedSpaces: string[]; myUserId: string }) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [spacesValue, setSpacesValue] = useState(config.allowedSpaces.join("\n"));
+  const [userIdValue, setUserIdValue] = useState(config.myUserId || "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const newSpaces = spacesValue
+        .split("\n")
+        .map((s) => s.trim())
+        .filter((s) => s.startsWith("spaces/"));
+      await onSave({ allowedSpaces: newSpaces, myUserId: userIdValue.trim() });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="space-y-3">
+        <div>
+          <label className="text-zinc-400 text-xs font-medium">Allowed Spaces</label>
+          <div className="mt-1 space-y-1">
+            {config.allowedSpaces.length === 0 ? (
+              <p className="text-zinc-500 text-sm">No spaces configured</p>
+            ) : (
+              config.allowedSpaces.map((space) => (
+                <div key={space} className="px-2 py-1 bg-zinc-800 rounded text-sm text-zinc-300 font-mono">
+                  {space}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+        <div>
+          <label className="text-zinc-400 text-xs font-medium">Assistant&apos;s User ID</label>
+          <p className="text-zinc-500 text-xs">Used to filter out the assistant&apos;s own messages</p>
+          <div className="mt-1 px-2 py-1 bg-zinc-800 rounded text-sm text-zinc-300 font-mono">
+            {config.myUserId || "(not set)"}
+          </div>
+        </div>
+        <button
+          onClick={() => {
+            setSpacesValue(config.allowedSpaces.join("\n"));
+            setUserIdValue(config.myUserId || "");
+            setEditing(true);
+          }}
+          className="px-3 py-1 text-sm text-blue-400 hover:text-blue-300"
+        >
+          Edit
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-zinc-400 text-xs font-medium">Allowed Spaces</label>
+        <p className="text-zinc-500 text-xs mb-1">One space ID per line (e.g., spaces/AAAA12345)</p>
+        <textarea
+          value={spacesValue}
+          onChange={(e) => setSpacesValue(e.target.value)}
+          placeholder="spaces/AAAA12345"
+          rows={3}
+          className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-600 font-mono"
+        />
+      </div>
+      <div>
+        <label className="text-zinc-400 text-xs font-medium">Assistant&apos;s User ID</label>
+        <p className="text-zinc-500 text-xs mb-1">Format: users/123456789 (run list-members.ts to find it)</p>
+        <input
+          type="text"
+          value={userIdValue}
+          onChange={(e) => setUserIdValue(e.target.value)}
+          placeholder="users/123456789"
+          className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-600 font-mono"
+        />
+      </div>
+      <div className="flex gap-2">
         <button
           onClick={handleSave}
           disabled={saving}

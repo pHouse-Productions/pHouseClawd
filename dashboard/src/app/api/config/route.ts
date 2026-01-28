@@ -10,6 +10,7 @@ const GOOGLE_CREDENTIALS_FILE = path.join(MCP_ROOT, "credentials/client_secret.j
 const DASHBOARD_ENV_FILE = path.join(PROJECT_ROOT, "dashboard/.env.local");
 const CHANNELS_CONFIG = path.join(PROJECT_ROOT, "config/channels.json");
 const EMAIL_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/email-security.json");
+const GCHAT_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/gchat-security.json");
 const CLAUDE_MD_FILE = path.join(PROJECT_ROOT, "CLAUDE.md");
 
 // Config schema - keys exposed in UI
@@ -140,13 +141,14 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
 export async function GET() {
   try {
     // Read all config sources
-    const [envVars, dashboardVars, googleToken, googleCredentials, channelsConfig, emailSecurityConfig, claudeMd] = await Promise.all([
+    const [envVars, dashboardVars, googleToken, googleCredentials, channelsConfig, emailSecurityConfig, gchatSecurityConfig, claudeMd] = await Promise.all([
       parseEnvFile(MCP_ENV_FILE),
       parseEnvFile(DASHBOARD_ENV_FILE),
       readJsonFile(GOOGLE_TOKEN_FILE),
       readJsonFile(GOOGLE_CREDENTIALS_FILE),
       readJsonFile(CHANNELS_CONFIG),
       readJsonFile(EMAIL_SECURITY_CONFIG),
+      readJsonFile(GCHAT_SECURITY_CONFIG),
       fs.readFile(CLAUDE_MD_FILE, "utf-8").catch(() => ""),
     ]);
 
@@ -236,6 +238,7 @@ export async function GET() {
         },
       },
       emailSecurity: emailSecurityConfig,
+      gchatSecurity: gchatSecurityConfig || { allowedSpaces: [], myUserId: "" },
       claudeMd: claudeMd,
     });
   } catch (error) {
@@ -325,6 +328,11 @@ export async function POST(request: NextRequest) {
       case "emailSecurity": {
         await writeJsonFile(EMAIL_SECURITY_CONFIG, data);
         return NextResponse.json({ success: true, message: "Email security config updated." });
+      }
+
+      case "gchatSecurity": {
+        await writeJsonFile(GCHAT_SECURITY_CONFIG, data);
+        return NextResponse.json({ success: true, message: "Google Chat config updated. Restart required." });
       }
 
       case "claudeMd": {
