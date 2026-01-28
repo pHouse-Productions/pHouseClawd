@@ -28,11 +28,9 @@ WATCHER_PID=$!
 # Give it a moment to connect
 sleep 2
 
-# Build and start the dashboard
+# Build and start dashboard in production mode
 echo "Building dashboard..."
-cd dashboard && npm run build
-echo "Starting dashboard..."
-npm run start -- -p 3000 &
+cd dashboard && npm run build && npm run start -- -p 3000 &
 DASHBOARD_PID=$!
 cd ..
 

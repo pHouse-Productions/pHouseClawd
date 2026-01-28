@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import os from "os";
+import RestartButton from "@/components/RestartButton";
 
 async function getSystemStats() {
   const uptime = os.uptime();
@@ -56,7 +57,6 @@ function formatBytes(bytes: number): string {
 }
 
 function getProjectRoot(): string {
-  // Dashboard lives in PROJECT_ROOT/dashboard
   return path.resolve(process.cwd(), "..");
 }
 
@@ -105,14 +105,17 @@ export default async function Home() {
   const activities = await getRecentActivity();
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white">System Overview</h2>
-        <p className="text-zinc-500 mt-1">Monitor your pHouseClawd instance</p>
+    <div className="space-y-4">
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white">System</h2>
+          <p className="text-zinc-500 mt-1">pHouseClawd overview</p>
+        </div>
+        <RestartButton />
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Stats Grid - 2x2 on mobile */}
+      <div className="grid grid-cols-2 gap-3">
         <StatCard
           title="Uptime"
           value={stats.uptime}
@@ -155,19 +158,19 @@ export default async function Home() {
       </div>
 
       {/* Recent Activity */}
-      <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Recent Activity</h3>
+      <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
+        <h3 className="text-sm font-semibold text-white mb-3">Activity</h3>
         {activities.length > 0 ? (
-          <ul className="space-y-3">
+          <ul className="space-y-2">
             {activities.map((activity, i) => (
-              <li key={i} className="flex items-center gap-3 text-zinc-400">
-                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+              <li key={i} className="flex items-center gap-3 text-sm text-zinc-400">
+                <span className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0"></span>
                 {activity.message}
               </li>
             ))}
           </ul>
         ) : (
-          <p className="text-zinc-500">No recent activity</p>
+          <p className="text-zinc-500 text-sm">No recent activity</p>
         )}
       </div>
     </div>
@@ -186,13 +189,13 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-5">
-      <div className="flex items-center gap-3 text-zinc-400 mb-3">
+    <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
+      <div className="flex items-center gap-2 text-zinc-400 mb-2">
         {icon}
-        <span className="text-sm font-medium">{title}</span>
+        <span className="text-xs font-medium">{title}</span>
       </div>
-      <div className="text-2xl font-bold text-white">{value}</div>
-      {subtitle && <div className="text-sm text-zinc-500 mt-1">{subtitle}</div>}
+      <div className="text-xl font-bold text-white">{value}</div>
+      {subtitle && <div className="text-xs text-zinc-500 mt-1">{subtitle}</div>}
     </div>
   );
 }

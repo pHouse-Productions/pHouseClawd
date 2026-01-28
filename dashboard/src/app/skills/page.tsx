@@ -1,19 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { authFetch } from "@/lib/auth";
-import MarkdownRenderer from "../../components/MarkdownRenderer";
 
 interface SkillInfo {
   name: string;
   description: string;
   path: string;
-  content: string;
 }
 
 export default function SkillsPage() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
-  const [selectedSkill, setSelectedSkill] = useState<SkillInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,9 +19,6 @@ export default function SkillsPage() {
       .then((res) => res.json())
       .then((data) => {
         setSkills(data.skills || []);
-        if (data.skills?.length > 0) {
-          setSelectedSkill(data.skills[0]);
-        }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -31,10 +26,10 @@ export default function SkillsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Skills</h2>
-          <p className="text-zinc-500 mt-1">Available skills and capabilities</p>
+          <p className="text-zinc-500 mt-1">Available capabilities</p>
         </div>
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-8 text-center">
           <p className="text-zinc-500">Loading...</p>
@@ -44,10 +39,10 @@ export default function SkillsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <h2 className="text-2xl font-bold text-white">Skills</h2>
-        <p className="text-zinc-500 mt-1">Available skills and capabilities</p>
+        <p className="text-zinc-500 mt-1">Available capabilities ({skills.length})</p>
       </div>
 
       {skills.length === 0 ? (
@@ -58,54 +53,31 @@ export default function SkillsPage() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Skill List */}
-          <div className="lg:col-span-1">
-            <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
-              <div className="px-4 py-3 border-b border-zinc-800">
-                <h3 className="text-sm font-semibold text-white">
-                  Available Skills ({skills.length})
-                </h3>
-              </div>
-              <div className="divide-y divide-zinc-800">
-                {skills.map((skill) => (
-                  <button
-                    key={skill.name}
-                    onClick={() => setSelectedSkill(skill)}
-                    className={`block w-full text-left px-4 py-3 hover:bg-zinc-800/50 transition-colors ${
-                      selectedSkill?.name === skill.name ? "bg-zinc-800" : ""
-                    }`}
-                  >
-                    <div className="text-white text-sm font-medium">{skill.name}</div>
-                    <div className="text-zinc-500 text-xs mt-1 line-clamp-2">
-                      {skill.description || "No description"}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Skill Content */}
-          <div className="lg:col-span-3">
-            <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
-              <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+        <div className="space-y-2">
+          {skills.map((skill) => (
+            <Link
+              key={skill.name}
+              href={`/skills/${encodeURIComponent(skill.name)}`}
+              className="flex items-center justify-between bg-zinc-900 rounded-lg border border-zinc-800 p-4 active:bg-zinc-800"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-white">
-                    {selectedSkill?.name || "Select a skill"}
-                  </h3>
-                  <p className="text-xs text-zinc-500 mt-0.5">{selectedSkill?.path}</p>
+                  <div className="text-white font-medium">{skill.name}</div>
+                  <div className="text-sm text-zinc-500 line-clamp-1">
+                    {skill.description || "No description"}
+                  </div>
                 </div>
               </div>
-              <div className="p-4 max-h-[600px] overflow-auto">
-                {selectedSkill ? (
-                  <MarkdownRenderer content={selectedSkill.content} />
-                ) : (
-                  <p className="text-zinc-500">Select a skill to view its details</p>
-                )}
-              </div>
-            </div>
-          </div>
+              <svg className="w-5 h-5 text-zinc-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          ))}
         </div>
       )}
     </div>

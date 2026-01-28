@@ -40,24 +40,24 @@ export default async function ConfigPage() {
   const modified = await getFileModified(path.join(getProjectRoot(), "CLAUDE.md"));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <h2 className="text-2xl font-bold text-white">Configuration</h2>
-        <p className="text-zinc-500 mt-1">View assistant configuration</p>
+        <p className="text-zinc-500 mt-1">Assistant settings</p>
       </div>
 
-      <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
-        <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-white">CLAUDE.md</h3>
-            <p className="text-sm text-zinc-500">Assistant identity and instructions</p>
-          </div>
-          <div className="text-xs text-zinc-500">
-            Last modified: {formatDate(modified)}
+      <div className="bg-zinc-900 rounded-lg border border-zinc-800">
+        <div className="px-4 py-3 border-b border-zinc-800">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-white">CLAUDE.md</h3>
+              <p className="text-xs text-zinc-500 mt-0.5">Identity and instructions</p>
+            </div>
+            <span className="text-xs text-zinc-500">{formatDate(modified)}</span>
           </div>
         </div>
-        <div className="p-6">
-          <pre className="whitespace-pre-wrap text-zinc-300 text-sm font-mono bg-zinc-950 rounded-lg p-4 overflow-auto max-h-[600px]">
+        <div className="p-4">
+          <pre className="whitespace-pre-wrap text-zinc-300 text-sm font-mono bg-zinc-950 rounded-lg p-4 break-words">
             {claudeMd}
           </pre>
         </div>
