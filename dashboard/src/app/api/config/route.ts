@@ -31,25 +31,6 @@ Look for "chat":{"id":XXXXXXXX} - that number is your Chat ID.`,
     },
   },
   google: {
-    GOOGLE_CLIENT_ID: {
-      label: "Google OAuth Client ID",
-      description: "Client ID for Google OAuth authentication",
-      howToGet: `1. Go to Google Cloud Console (console.cloud.google.com)
-2. Create a new project or select an existing one
-3. Go to "APIs & Services" > "Credentials"
-4. Click "Create Credentials" > "OAuth client ID"
-5. Select "Desktop app" as the application type
-6. Copy the Client ID`,
-      required: true,
-      sensitive: false,
-    },
-    GOOGLE_CLIENT_SECRET: {
-      label: "Google OAuth Client Secret",
-      description: "Client secret for Google OAuth authentication",
-      howToGet: `This is provided alongside the Client ID when you create OAuth credentials in Google Cloud Console.`,
-      required: true,
-      sensitive: true,
-    },
     GOOGLE_PLACES_API_KEY: {
       label: "Google Places API Key",
       description: "API key for Google Places (business search, reviews, etc.)",
@@ -63,6 +44,17 @@ Note: You'll need to enable the "Places API" in your project.`,
       required: false,
       sensitive: true,
     },
+  },
+  googleCredentials: {
+    label: "Google OAuth Credentials",
+    description: "OAuth client credentials for Google APIs (Gmail, Calendar, Drive, etc.)",
+    howToGet: `1. Go to Google Cloud Console (console.cloud.google.com)
+2. Create a new project or select an existing one
+3. Go to "APIs & Services" > "Credentials"
+4. Click "Create Credentials" > "OAuth client ID"
+5. Select "Desktop app" as the application type
+6. Click "Download JSON" to get your credentials file
+7. Paste the entire JSON contents here`,
   },
   ai: {
     OPENROUTER_API_KEY: {
@@ -158,18 +150,6 @@ export async function GET() {
       fs.readFile(CLAUDE_MD_FILE, "utf-8").catch(() => ""),
     ]);
 
-    // Extract Google credentials from JSON file if present
-    let googleClientId = envVars.GOOGLE_CLIENT_ID || "";
-    let googleClientSecret = envVars.GOOGLE_CLIENT_SECRET || "";
-    if (googleCredentials && typeof googleCredentials === "object") {
-      const creds = googleCredentials as Record<string, unknown>;
-      const installed = (creds.installed || creds.web) as Record<string, string> | undefined;
-      if (installed) {
-        googleClientId = googleClientId || installed.client_id || "";
-        googleClientSecret = googleClientSecret || installed.client_secret || "";
-      }
-    }
-
     // Helper to mask sensitive values
     const maskValue = (value: string | undefined, sensitive: boolean): string => {
       if (!value) return "";
@@ -184,18 +164,25 @@ export async function GET() {
       telegramVars[key] = maskValue(envVars[key], schema.sensitive);
     }
 
-    // Google vars - use credentials from JSON file as fallback
+    // Google env vars (just Places API key now)
     const googleVars: Record<string, string> = {};
     for (const [key, schema] of Object.entries(CONFIG_SCHEMA.google)) {
-      let value = envVars[key];
-      if (key === "GOOGLE_CLIENT_ID") value = googleClientId;
-      else if (key === "GOOGLE_CLIENT_SECRET") value = googleClientSecret;
-      googleVars[key] = maskValue(value, schema.sensitive);
+      googleVars[key] = maskValue(envVars[key], schema.sensitive);
     }
 
     const aiVars: Record<string, string> = {};
     for (const [key, schema] of Object.entries(CONFIG_SCHEMA.ai)) {
       aiVars[key] = maskValue(envVars[key], schema.sensitive);
+    }
+
+    // Check if Google credentials file exists and has required fields
+    let googleCredentialsStatus = "not_configured";
+    if (googleCredentials && typeof googleCredentials === "object") {
+      const creds = googleCredentials as Record<string, unknown>;
+      const installed = (creds.installed || creds.web) as Record<string, string> | undefined;
+      if (installed?.client_id && installed?.client_secret) {
+        googleCredentialsStatus = "configured";
+      }
     }
 
     // Process dashboard vars (mask sensitive ones)
@@ -232,6 +219,10 @@ export async function GET() {
       google: googleVars,
       ai: aiVars,
       dashboard: maskedDashboardVars,
+      googleCredentials: {
+        status: googleCredentialsStatus,
+        raw: googleCredentials ? JSON.stringify(googleCredentials, null, 2) : "",
+      },
       googleToken: {
         status: googleTokenStatus,
         expiry: googleTokenExpiry,
@@ -253,32 +244,6 @@ export async function POST(request: NextRequest) {
 
     switch (type) {
       case "env": {
-        // Google Client ID and Secret go to credentials JSON file
-        if (key === "GOOGLE_CLIENT_ID" || key === "GOOGLE_CLIENT_SECRET") {
-          let creds = await readJsonFile(GOOGLE_CREDENTIALS_FILE) as Record<string, unknown> | null;
-          if (!creds) {
-            creds = { installed: { client_id: "", client_secret: "", redirect_uris: ["http://localhost"] } };
-          }
-          const installed = (creds.installed || creds.web || {}) as Record<string, unknown>;
-          if (key === "GOOGLE_CLIENT_ID") {
-            installed.client_id = value || "";
-          } else {
-            installed.client_secret = value || "";
-          }
-          if (creds.installed) {
-            creds.installed = installed;
-          } else if (creds.web) {
-            creds.web = installed;
-          } else {
-            creds.installed = installed;
-          }
-          // Ensure credentials directory exists
-          await fs.mkdir(path.dirname(GOOGLE_CREDENTIALS_FILE), { recursive: true });
-          await writeJsonFile(GOOGLE_CREDENTIALS_FILE, creds);
-          return NextResponse.json({ success: true, message: `Updated ${key}. Restart required.` });
-        }
-
-        // Other env vars go to .env file
         const vars = await parseEnvFile(MCP_ENV_FILE);
         if (value === null || value === "") {
           delete vars[key];
@@ -287,6 +252,32 @@ export async function POST(request: NextRequest) {
         }
         await writeEnvFile(MCP_ENV_FILE, vars);
         return NextResponse.json({ success: true, message: `Updated ${key}. Restart required.` });
+      }
+
+      case "googleCredentials": {
+        if (!data || data.trim() === "") {
+          // Delete credentials file
+          try {
+            await fs.unlink(GOOGLE_CREDENTIALS_FILE);
+          } catch {
+            // File might not exist
+          }
+          return NextResponse.json({ success: true, message: "Google credentials removed." });
+        }
+        // Validate JSON and required fields
+        try {
+          const parsed = JSON.parse(data);
+          const installed = parsed.installed || parsed.web;
+          if (!installed?.client_id || !installed?.client_secret) {
+            return NextResponse.json({ error: "JSON must contain client_id and client_secret" }, { status: 400 });
+          }
+          // Ensure credentials directory exists
+          await fs.mkdir(path.dirname(GOOGLE_CREDENTIALS_FILE), { recursive: true });
+          await writeJsonFile(GOOGLE_CREDENTIALS_FILE, parsed);
+          return NextResponse.json({ success: true, message: "Google credentials updated. Restart required." });
+        } catch {
+          return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+        }
       }
 
       case "dashboard": {
