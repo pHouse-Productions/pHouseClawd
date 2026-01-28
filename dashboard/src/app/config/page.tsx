@@ -760,7 +760,7 @@ export default function ConfigPage() {
                     <ol className="list-decimal list-inside space-y-1 text-yellow-200/80">
                       <li>Log into the assistant&apos;s Google account and enable Google Chat in Workspace settings</li>
                       <li>From your own account, send a message to the assistant - you&apos;ll need to accept a prompt in the Google Chat UI to start the conversation</li>
-                      <li>Run <code className="bg-zinc-800 px-1 rounded">npx tsx listeners/gchat/test-api.ts</code> to find your space ID</li>
+                      <li>Select the spaces below that the assistant should listen to</li>
                     </ol>
                   </div>
                   <GChatSecurityEditor
@@ -977,102 +977,133 @@ function GChatSecurityEditor({
   config: { allowedSpaces: string[]; myUserId: string };
   onSave: (config: { allowedSpaces: string[]; myUserId: string }) => Promise<void>;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [spacesValue, setSpacesValue] = useState(config.allowedSpaces.join("\n"));
-  const [userIdValue, setUserIdValue] = useState(config.myUserId || "");
+  const [spaces, setSpaces] = useState<{ name: string; displayName: string; type: string }[]>([]);
+  const [detectedUserId, setDetectedUserId] = useState<string | null>(null);
+  const [selectedSpaces, setSelectedSpaces] = useState<Set<string>>(new Set(config.allowedSpaces));
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const fetchSpaces = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await authFetch("/api/gchat/spaces");
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setSpaces(data.spaces || []);
+        if (data.myUserId && !config.myUserId) {
+          setDetectedUserId(data.myUserId);
+        }
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSpaces();
+  }, []);
+
+  const toggleSpace = (spaceName: string) => {
+    const newSelected = new Set(selectedSpaces);
+    if (newSelected.has(spaceName)) {
+      newSelected.delete(spaceName);
+    } else {
+      newSelected.add(spaceName);
+    }
+    setSelectedSpaces(newSelected);
+  };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const newSpaces = spacesValue
-        .split("\n")
-        .map((s) => s.trim())
-        .filter((s) => s.startsWith("spaces/"));
-      await onSave({ allowedSpaces: newSpaces, myUserId: userIdValue.trim() });
-      setEditing(false);
+      await onSave({
+        allowedSpaces: Array.from(selectedSpaces),
+        myUserId: detectedUserId || config.myUserId || "",
+      });
     } finally {
       setSaving(false);
     }
   };
 
-  if (!editing) {
-    return (
-      <div className="space-y-3">
-        <div>
-          <label className="text-zinc-400 text-xs font-medium">Allowed Spaces</label>
-          <div className="mt-1 space-y-1">
-            {config.allowedSpaces.length === 0 ? (
-              <p className="text-zinc-500 text-sm">No spaces configured</p>
-            ) : (
-              config.allowedSpaces.map((space) => (
-                <div key={space} className="px-2 py-1 bg-zinc-800 rounded text-sm text-zinc-300 font-mono">
-                  {space}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-        <div>
-          <label className="text-zinc-400 text-xs font-medium">Assistant&apos;s User ID</label>
-          <p className="text-zinc-500 text-xs">Used to filter out the assistant&apos;s own messages</p>
-          <div className="mt-1 px-2 py-1 bg-zinc-800 rounded text-sm text-zinc-300 font-mono">
-            {config.myUserId || "(not set)"}
-          </div>
-        </div>
-        <button
-          onClick={() => {
-            setSpacesValue(config.allowedSpaces.join("\n"));
-            setUserIdValue(config.myUserId || "");
-            setEditing(true);
-          }}
-          className="px-3 py-1 text-sm text-blue-400 hover:text-blue-300"
-        >
-          Edit
-        </button>
-      </div>
-    );
-  }
+  const hasChanges =
+    JSON.stringify(Array.from(selectedSpaces).sort()) !== JSON.stringify(config.allowedSpaces.sort()) ||
+    (detectedUserId && detectedUserId !== config.myUserId);
 
   return (
     <div className="space-y-3">
       <div>
-        <label className="text-zinc-400 text-xs font-medium">Allowed Spaces</label>
-        <p className="text-zinc-500 text-xs mb-1">One space ID per line (e.g., spaces/AAAA12345)</p>
-        <textarea
-          value={spacesValue}
-          onChange={(e) => setSpacesValue(e.target.value)}
-          placeholder="spaces/AAAA12345"
-          rows={3}
-          className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-600 font-mono"
-        />
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-zinc-400 text-xs font-medium">Available Spaces</label>
+          <button
+            onClick={fetchSpaces}
+            disabled={loading}
+            className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-50"
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+
+        {error && (
+          <div className="p-2 bg-red-500/10 border border-red-500/20 rounded text-xs text-red-400 mb-2">
+            {error}
+          </div>
+        )}
+
+        {spaces.length === 0 && !loading && !error && (
+          <p className="text-zinc-500 text-sm">No spaces found. Make sure Google Chat is enabled and you have conversations.</p>
+        )}
+
+        <div className="space-y-1 max-h-48 overflow-y-auto">
+          {spaces.map((space) => (
+            <label
+              key={space.name}
+              className="flex items-center gap-3 p-2 bg-zinc-800 rounded cursor-pointer hover:bg-zinc-750"
+            >
+              <input
+                type="checkbox"
+                checked={selectedSpaces.has(space.name!)}
+                onChange={() => toggleSpace(space.name!)}
+                className="w-4 h-4 rounded border-zinc-600 bg-zinc-700 text-green-500 focus:ring-green-500 focus:ring-offset-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-white truncate">{space.displayName}</div>
+                <div className="text-xs text-zinc-500 font-mono truncate">{space.name}</div>
+              </div>
+              <span className="text-xs text-zinc-500 capitalize">
+                {space.type?.toLowerCase().replace("_", " ")}
+              </span>
+            </label>
+          ))}
+        </div>
       </div>
-      <div>
-        <label className="text-zinc-400 text-xs font-medium">Assistant&apos;s User ID</label>
-        <p className="text-zinc-500 text-xs mb-1">Format: users/123456789 (run list-members.ts to find it)</p>
-        <input
-          type="text"
-          value={userIdValue}
-          onChange={(e) => setUserIdValue(e.target.value)}
-          placeholder="users/123456789"
-          className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-600 font-mono"
-        />
-      </div>
-      <div className="flex gap-2">
+
+      {(detectedUserId || config.myUserId) && (
+        <div>
+          <label className="text-zinc-400 text-xs font-medium">Assistant&apos;s User ID</label>
+          <div className="mt-1 px-2 py-1 bg-zinc-800 rounded text-sm text-zinc-300 font-mono">
+            {detectedUserId || config.myUserId}
+            {detectedUserId && !config.myUserId && (
+              <span className="ml-2 text-xs text-green-400">(auto-detected)</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {hasChanges && (
         <button
           onClick={handleSave}
           disabled={saving}
-          className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded disabled:opacity-50"
+          className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded disabled:opacity-50"
         >
-          {saving ? "..." : "Save"}
+          {saving ? "Saving..." : "Save Changes"}
         </button>
-        <button
-          onClick={() => setEditing(false)}
-          className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-white text-sm rounded"
-        >
-          Cancel
-        </button>
-      </div>
+      )}
     </div>
   );
 }
