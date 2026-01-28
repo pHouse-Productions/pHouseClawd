@@ -36,11 +36,19 @@ git config --global user.name "pHouseClawd"
 git config --global user.email "assistant@phouse.bot"
 echo "Git configured as: pHouseClawd <assistant@phouse.bot>"
 
-# Seed CLAUDE.md from template if it doesn't exist
-if [ ! -f "$SCRIPT_DIR/CLAUDE.md" ]; then
-    print_step "Creating CLAUDE.md seed file..."
-    cp "$SCRIPT_DIR/CLAUDE.md.template" "$SCRIPT_DIR/CLAUDE.md"
+# Seed files from seed/ directory
+print_step "Seeding configuration files..."
+
+# Seed CLAUDE.md if it doesn't exist
+if [ ! -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/seed/CLAUDE.md" ]; then
+    cp "$SCRIPT_DIR/seed/CLAUDE.md" "$SCRIPT_DIR/CLAUDE.md"
     echo "Created CLAUDE.md - your assistant will run onboarding on first conversation."
+fi
+
+# Seed .claude/ directory (skills, commands, etc.) if it doesn't exist
+if [ ! -d "$SCRIPT_DIR/.claude" ] && [ -d "$SCRIPT_DIR/seed/.claude" ]; then
+    cp -r "$SCRIPT_DIR/seed/.claude" "$SCRIPT_DIR/.claude"
+    echo "Seeded .claude/ directory (skills, etc.)"
 fi
 
 # ============================================

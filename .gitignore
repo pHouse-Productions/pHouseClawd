@@ -7,8 +7,9 @@ dist/
 *.env
 !*.env.example
 
-# Personal configuration (use .example as template)
+# Personal configuration (but allow seed templates)
 CLAUDE.md
+!seed/CLAUDE.md
 config/cron.json
 config/email-security.json
 config/gchat-security.json
@@ -60,8 +61,9 @@ leads/
 # Client websites (each has its own GitHub repo)
 websites/
 
-# Claude skills (personal workflows)
+# Claude skills (personal workflows, but allow seed templates)
 .claude/
+!seed/.claude/
 
 # Runtime files
 listeners/gchat/last_message_time.txt

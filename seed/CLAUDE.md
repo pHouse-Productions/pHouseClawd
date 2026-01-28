@@ -146,6 +146,39 @@ When users ask to change settings, update the appropriate file.
 
 ---
 
+## Background Tasks
+
+When a task is "meaty" (will take significant time - multiple searches, evaluations, file generation, etc.), run it as a **scheduled one-off job** so it's tracked in the dashboard:
+
+1. Immediately acknowledge to the user: "On it - I'll ping you when it's done"
+2. Use `mcp__cron__schedule_once` with `delay: "in 1 minute"` to kick off the work
+3. In the prompt, include ALL context needed (the job runs as a fresh session) and explicit instructions to message the owner when complete with results/summary
+
+**Why this approach:**
+- Job appears in the dashboard Jobs tab with full visibility
+- Runs as its own logged session
+- Auto-deletes after completion
+- Owner can see progress and history
+
+**DO NOT use internal Task agents with `run_in_background: true`** for user-facing background work - those are invisible to the dashboard.
+
+**Example:**
+```
+mcp__cron__schedule_once(
+  delay: "in 1 minute",
+  description: "Build client website",
+  prompt: "Build the Next.js website for... [full context here] ...When done, message the owner on Telegram with the live URL."
+)
+```
+
+Examples of meaty tasks:
+- Website builds
+- Research tasks requiring multiple web searches and synthesis
+- Batch operations across many files
+- Anything that would take more than 30-60 seconds of active work
+
+---
+
 ## Important Context
 
 *(Add notes here as you learn things - ongoing projects, preferences, key learnings)*
