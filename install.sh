@@ -29,24 +29,17 @@ print_error() {
 }
 
 # ============================================
-# Step 1: Assistant Name
+# Step 1: Git Identity
 # ============================================
-echo "What would you like to name your assistant?"
-read -p "Assistant name: " ASSISTANT_NAME
-
-if [ -z "$ASSISTANT_NAME" ]; then
-    ASSISTANT_NAME="pHouseClawd"
-fi
-
-# Configure git identity for this assistant
-git config --global user.name "$ASSISTANT_NAME"
-git config --global user.email "${ASSISTANT_NAME,,}@phouse.bot"
-echo "Git configured as: $ASSISTANT_NAME <${ASSISTANT_NAME,,}@phouse.bot>"
+# Configure git identity for the assistant
+git config --global user.name "pHouseClawd"
+git config --global user.email "assistant@phouse.bot"
+echo "Git configured as: pHouseClawd <assistant@phouse.bot>"
 
 # Seed CLAUDE.md from template if it doesn't exist
 if [ ! -f "$SCRIPT_DIR/CLAUDE.md" ]; then
-    print_step "Creating CLAUDE.md for $ASSISTANT_NAME..."
-    sed "s/{ASSISTANT_NAME}/$ASSISTANT_NAME/g" "$SCRIPT_DIR/CLAUDE.md.template" > "$SCRIPT_DIR/CLAUDE.md"
+    print_step "Creating CLAUDE.md seed file..."
+    cp "$SCRIPT_DIR/CLAUDE.md.template" "$SCRIPT_DIR/CLAUDE.md"
     echo "Created CLAUDE.md - your assistant will run onboarding on first conversation."
 fi
 
@@ -389,6 +382,12 @@ else
 fi
 
 # ============================================
+# Step 14: Start the assistant
+# ============================================
+print_step "Starting pHouseClawd..."
+"$SCRIPT_DIR/restart.sh"
+
+# ============================================
 # Done!
 # ============================================
 echo ""
@@ -404,9 +403,9 @@ if [ -n "$DASHBOARD_PASSWORD" ]; then
     echo ""
 fi
 
-echo "Next steps:"
+echo "Your assistant is now running!"
 echo ""
-echo "1. Configure your assistant via the dashboard:"
+echo "Dashboard:"
 if [[ "$DNS_READY" =~ ^[Yy]$ ]] && [ -n "$DASHBOARD_DOMAIN" ]; then
     echo "   https://$DASHBOARD_DOMAIN"
 elif [ -n "$DASHBOARD_DOMAIN" ]; then
@@ -415,11 +414,9 @@ else
     echo "   http://localhost:3000 (or your EC2 IP:3000)"
 fi
 echo ""
-echo "2. Start the assistant:"
-echo "   ./restart.sh"
-echo ""
 echo "Useful commands:"
-echo "  ./restart.sh              - Start/restart the assistant"
+echo "  ./restart.sh                       - Restart the assistant"
+echo "  ./kill.sh                          - Stop the assistant"
 echo "  sudo systemctl status phouseclawd  - Check service status"
 echo "  sudo systemctl status caddy        - Check SSL proxy status"
 echo ""

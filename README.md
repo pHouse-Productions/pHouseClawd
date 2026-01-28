@@ -362,13 +362,13 @@ Your assistant will now respond to messages in the whitelisted Google Chat space
 
 ## Customization
 
-Your assistant's personality lives in `CLAUDE.md`. Tell Claude how you want to customize:
-- Name and identity
+Your assistant's personality lives in `CLAUDE.md`. The install script creates this as a seed file, and your assistant will run through an onboarding conversation to fill it in:
+- Pick a name together
 - Communication style (formal, casual, funny, whatever)
 - Your personal info and preferences
 - Important context about your life/work
 
-See `CLAUDE.example.md` for a template.
+The assistant updates `CLAUDE.md` itself as it learns about you.
 
 ## Running Your Assistant
 
