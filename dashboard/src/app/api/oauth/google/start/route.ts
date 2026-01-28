@@ -129,8 +129,17 @@ export async function GET() {
       parseEnvFile(DASHBOARD_ENV_FILE),
     ]);
 
+    const baseUrl = dashboardEnv.DASHBOARD_URL || "localhost:3000";
+    const authServiceUrl = dashboardEnv.AUTH_SERVICE_URL;
+
+    // If auth service is configured, redirect there instead
+    if (authServiceUrl) {
+      const authUrl = `${authServiceUrl}/api/oauth/google/start?origin=${encodeURIComponent(baseUrl)}`;
+      return NextResponse.redirect(authUrl);
+    }
+
+    // Otherwise, do OAuth directly (requires local Google credentials)
     const credentials = await getGoogleCredentials(mcpEnv);
-    const baseUrl = dashboardEnv.DASHBOARD_URL || "http://localhost:3000";
 
     if (!credentials) {
       return NextResponse.json(
@@ -140,8 +149,8 @@ export async function GET() {
     }
 
     const { clientId } = credentials;
-
-    const redirectUri = `${baseUrl}/api/oauth/google/callback`;
+    const fullBaseUrl = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
+    const redirectUri = `${fullBaseUrl}/api/oauth/google/callback`;
 
     // Build the Google OAuth URL
     const params = new URLSearchParams({

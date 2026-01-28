@@ -115,7 +115,49 @@ fi
 
 # Dashboard
 if [ -d "dashboard" ]; then
-    cd dashboard && npm install && npm run build && cd ..
+    cd dashboard && npm install
+
+    # Generate dashboard password if not already set
+    if [ ! -f ".env.local" ] || ! grep -q "DASHBOARD_PASSWORD" .env.local 2>/dev/null; then
+        print_step "Generating dashboard password..."
+        DASHBOARD_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
+        echo "DASHBOARD_PASSWORD=$DASHBOARD_PASSWORD" >> .env.local
+    fi
+
+    # Ask for domain if not already set
+    if ! grep -q "DASHBOARD_URL" .env.local 2>/dev/null; then
+        echo ""
+        read -p "Enter your domain name (e.g., vito.example.com): " DASHBOARD_DOMAIN
+        if [ -n "$DASHBOARD_DOMAIN" ]; then
+            echo "DASHBOARD_URL=$DASHBOARD_DOMAIN" >> .env.local
+        fi
+    fi
+
+    # Ask for auth service URL if not already set
+    if ! grep -q "AUTH_SERVICE_URL" .env.local 2>/dev/null; then
+        echo ""
+        echo "If you have a centralized pHouseClawdAuth service, enter its URL."
+        echo "This lets you use one Google OAuth app for all your instances."
+        read -p "Auth service URL (leave blank to skip): " AUTH_SERVICE
+        if [ -n "$AUTH_SERVICE" ]; then
+            echo "AUTH_SERVICE_URL=$AUTH_SERVICE" >> .env.local
+        fi
+    fi
+
+    # Show the generated password
+    DASHBOARD_PASSWORD=$(grep "DASHBOARD_PASSWORD" .env.local | cut -d'=' -f2)
+    echo ""
+    echo "=============================================="
+    echo -e "${GREEN}   Dashboard Configuration${NC}"
+    echo "=============================================="
+    echo ""
+    echo -e "Your dashboard password is: ${YELLOW}${DASHBOARD_PASSWORD}${NC}"
+    echo ""
+    echo "Save this password! You'll need it to log into the dashboard."
+    echo "(Stored in dashboard/.env.local)"
+    echo ""
+
+    npm run build && cd ..
 fi
 
 # Listeners
@@ -192,12 +234,8 @@ echo ""
 print_step "Claude Code Authentication"
 echo ""
 
-echo "You need to authenticate Claude Code with your Anthropic account."
-echo "This will open a browser or provide a login code."
-echo ""
-read -p "Press Enter to start Claude Code authentication..."
-claude auth login 2>/dev/null || claude login 2>/dev/null || {
-    echo "Run 'claude' manually to complete authentication."
+claude setup-token || {
+    print_warning "Run 'claude setup-token' manually to complete authentication."
 }
 
 # ============================================
