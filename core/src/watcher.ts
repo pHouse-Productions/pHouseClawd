@@ -15,12 +15,12 @@ import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
 import { GChatChannel } from "./channels/gchat.js";
 
-// Load environment variables
-config({ path: "/home/ubuntu/pHouseMcp/.env" });
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
+
+// Load environment variables from sibling pHouseMcp directory
+config({ path: path.resolve(PROJECT_ROOT, "../pHouseMcp/.env") });
 
 // Generate a deterministic UUID v5 from a namespace + name
 const NAMESPACE_UUID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
@@ -40,10 +40,15 @@ function generateSessionId(name: string): string {
 
 const PDF_SCRIPT = path.join(PROJECT_ROOT, "scripts/pdf-to-text.py");
 const LOGS_DIR = path.join(PROJECT_ROOT, "logs");
+const JOBS_DIR = path.join(LOGS_DIR, "jobs");
 const LOG_FILE = path.join(LOGS_DIR, "watcher.log");
-const STREAM_LOG = path.join(LOGS_DIR, "claude-stream.jsonl");
 const SESSIONS_FILE = path.join(LOGS_DIR, "sessions.json");
 const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
+
+// Ensure jobs directory exists
+if (!fs.existsSync(JOBS_DIR)) {
+  fs.mkdirSync(JOBS_DIR, { recursive: true });
+}
 
 // Short-term memory
 const SHORT_TERM_MEMORY_DIR = path.join(PROJECT_ROOT, "memory/short-term");
@@ -208,12 +213,81 @@ function log(message: string) {
   process.stdout.write(line);
 }
 
-function logStreamEvent(event: any) {
-  const entry = {
-    ts: new Date().toISOString(),
-    ...event
+// Job file management
+interface JobData {
+  id: string;
+  startTime: string;
+  endTime?: string;
+  channel: string;
+  trigger: string;
+  status: "running" | "completed" | "error";
+  model?: string;
+  cost?: number;
+  durationMs?: number;
+  toolCount: number;
+  events: any[];
+}
+
+function generateJobId(): string {
+  const now = new Date();
+  const timestamp = now.toISOString().replace(/[:.]/g, "-");
+  const uuid = crypto.randomUUID().slice(0, 8);
+  return `${timestamp}-${uuid}`;
+}
+
+function getJobFilePath(jobId: string): string {
+  return path.join(JOBS_DIR, `${jobId}.json`);
+}
+
+function createJobFile(jobId: string, channel: string, trigger: string): void {
+  const jobData: JobData = {
+    id: jobId,
+    startTime: new Date().toISOString(),
+    channel,
+    trigger,
+    status: "running",
+    toolCount: 0,
+    events: [],
   };
-  fs.appendFileSync(STREAM_LOG, JSON.stringify(entry) + "\n");
+  fs.writeFileSync(getJobFilePath(jobId), JSON.stringify(jobData, null, 2));
+}
+
+function appendJobEvent(jobId: string, event: any): void {
+  const filePath = getJobFilePath(jobId);
+  try {
+    const jobData: JobData = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    const eventWithTs = { ts: new Date().toISOString(), ...event };
+    jobData.events.push(eventWithTs);
+
+    // Count tool uses
+    if (event.type === "assistant" && event.message?.content) {
+      const toolUses = event.message.content.filter((c: any) => c.type === "tool_use");
+      jobData.toolCount += toolUses.length;
+    }
+
+    // Capture model from init
+    if (event.type === "system" && event.subtype === "init" && event.model) {
+      jobData.model = event.model;
+    }
+
+    fs.writeFileSync(filePath, JSON.stringify(jobData, null, 2));
+  } catch (err) {
+    log(`[Jobs] Error appending event to ${jobId}: ${err}`);
+  }
+}
+
+function finalizeJob(jobId: string, status: "completed" | "error", cost?: number, durationMs?: number): void {
+  const filePath = getJobFilePath(jobId);
+  try {
+    const jobData: JobData = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    jobData.status = status;
+    jobData.endTime = new Date().toISOString();
+    if (cost !== undefined) jobData.cost = cost;
+    if (durationMs !== undefined) jobData.durationMs = durationMs;
+    fs.writeFileSync(filePath, JSON.stringify(jobData, null, 2));
+  } catch (err) {
+    log(`[Jobs] Error finalizing ${jobId}: ${err}`);
+  }
 }
 
 // Short-term memory logging
@@ -606,8 +680,12 @@ async function handleChannelEvent(
   // In transcript mode: always new session. In session mode: resume if exists.
   const useNewSession = isTranscriptMode || isNewSession;
 
+  // Create a job file for this invocation
+  const jobId = generateJobId();
+  createJobFile(jobId, channel.name, prompt.slice(0, 500));
+
   return new Promise((resolve, reject) => {
-    log(`[Watcher] Spawning Claude with session ${sessionId} (mode: ${channelMode}, ${useNewSession ? "new" : "resuming"})`);
+    log(`[Watcher] Spawning Claude with session ${sessionId} (mode: ${channelMode}, ${useNewSession ? "new" : "resuming"}) [job: ${jobId}]`);
 
     const sessionArg = useNewSession
       ? ["--session-id", isTranscriptMode ? generateSessionId(`${sessionKey}-transcript-${Date.now()}`) : sessionId]
@@ -634,6 +712,8 @@ async function handleChannelEvent(
     let stderr = "";
     let lineBuffer = "";
     let outgoingTextBuffer = ""; // Buffer for short-term memory logging
+    let lastCost: number | undefined;
+    let lastDurationMs: number | undefined;
 
     proc.stdout.on("data", (data) => {
       const chunk = data.toString();
@@ -647,8 +727,19 @@ async function handleChannelEvent(
         if (!line.trim()) continue;
         try {
           const streamEvent = JSON.parse(line);
-          logStreamEvent(streamEvent);
-          handler.onStreamEvent(streamEvent);
+          appendJobEvent(jobId, streamEvent);
+
+          // Capture cost/duration from result events
+          if (streamEvent.type === "result") {
+            lastCost = streamEvent.total_cost_usd;
+            lastDurationMs = streamEvent.duration_ms;
+          }
+
+          try {
+            handler.onStreamEvent(streamEvent);
+          } catch (handlerErr) {
+            log(`[Stream] Handler error: ${handlerErr}`);
+          }
 
           // Accumulate text for short-term memory (at streaming level)
           const text = extractTextFromStreamEvent(streamEvent);
@@ -669,8 +760,12 @@ async function handleChannelEvent(
     });
 
     proc.on("close", (code) => {
-      log(`[Watcher] Claude exited with code ${code}`);
+      log(`[Watcher] Claude exited with code ${code} [job: ${jobId}]`);
       handler.onComplete(code || 0);
+
+      // Finalize the job file
+      const status = code === 0 ? "completed" : "error";
+      finalizeJob(jobId, status, lastCost, lastDurationMs);
 
       // Log outgoing response to short-term memory
       if (outgoingTextBuffer.trim()) {
@@ -681,6 +776,12 @@ async function handleChannelEvent(
 
       if (code !== 0) {
         log(`[Watcher] Claude error - stderr: ${stderr}`);
+        // Check if this looks like an API error (corrupted session)
+        // If so, clear the session so the next message starts fresh
+        if (stdout.includes("invalid_request_error") || stdout.includes("Could not process")) {
+          log(`[Watcher] Detected API error - clearing corrupted session ${sessionKey}`);
+          clearSession(sessionKey);
+        }
         reject(new Error(stderr));
       } else {
         log(`[Watcher] Claude finished handling event successfully`);
@@ -696,6 +797,7 @@ async function handleChannelEvent(
     proc.on("error", (err) => {
       log(`[Watcher] Claude spawn error: ${err.message}`);
       handler.onComplete(1);
+      finalizeJob(jobId, "error");
       reject(err);
     });
   });
@@ -852,8 +954,12 @@ async function handleCronJob(job: CronJob): Promise<void> {
 
   const handler = new CronEventHandler(job.id);
 
+  // Create a job file for this cron execution
+  const jobFileId = generateJobId();
+  createJobFile(jobFileId, "cron", `[${job.description}] ${prompt.slice(0, 400)}`);
+
   return new Promise((resolve, reject) => {
-    log(`[Cron] Running job ${job.id}: ${job.description}`);
+    log(`[Cron] Running job ${job.id}: ${job.description} [job: ${jobFileId}]`);
 
     const sessionArg = isNewSession
       ? ["--session-id", sessionId]
@@ -877,6 +983,8 @@ async function handleCronJob(job: CronJob): Promise<void> {
     );
 
     let lineBuffer = "";
+    let lastCost: number | undefined;
+    let lastDurationMs: number | undefined;
 
     proc.stdout.on("data", (data) => {
       const chunk = data.toString();
@@ -889,8 +997,14 @@ async function handleCronJob(job: CronJob): Promise<void> {
         if (!line.trim()) continue;
         try {
           const streamEvent = JSON.parse(line);
-          logStreamEvent(streamEvent);
+          appendJobEvent(jobFileId, streamEvent);
           handler.onStreamEvent(streamEvent);
+
+          // Capture cost/duration from result events
+          if (streamEvent.type === "result") {
+            lastCost = streamEvent.total_cost_usd;
+            lastDurationMs = streamEvent.duration_ms;
+          }
         } catch {}
       }
     });
@@ -900,6 +1014,10 @@ async function handleCronJob(job: CronJob): Promise<void> {
       if (isNewSession) {
         markSessionKnown(sessionId);
       }
+
+      // Finalize the job file
+      const status = code === 0 ? "completed" : "error";
+      finalizeJob(jobFileId, status, lastCost, lastDurationMs);
 
       // Log cron output to short-term memory
       if (handler.textBuffer.trim()) {
@@ -913,6 +1031,7 @@ async function handleCronJob(job: CronJob): Promise<void> {
 
     proc.on("error", (err) => {
       handler.onComplete(1);
+      finalizeJob(jobFileId, "error");
       reject(err);
     });
   });
@@ -1015,7 +1134,10 @@ async function watch(): Promise<void> {
     try {
       log(`[Watcher] Starting ${channel.name} listener...`);
       const stop = await channel.startListener((event) => {
-        processEvent(channel, event);
+        processEvent(channel, event).catch((err) => {
+          log(`[Watcher] Error processing ${channel.name} event: ${err}`);
+          // Don't rethrow - the watcher should keep running
+        });
       });
       stopFunctions.push(stop);
       log(`[Watcher] ${channel.name} listener started`);
@@ -1058,7 +1180,18 @@ async function watch(): Promise<void> {
   process.once("SIGTERM", shutdown);
 }
 
+// Global error handlers to prevent crashes from unhandled errors
+process.on("uncaughtException", (err) => {
+  log(`[Watcher] Uncaught exception (non-fatal): ${err}`);
+  // Don't exit - keep the watcher running
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  log(`[Watcher] Unhandled rejection (non-fatal): ${reason}`);
+  // Don't exit - keep the watcher running
+});
+
 watch().catch((err) => {
-  log(`[Watcher] Fatal error: ${err}`);
+  log(`[Watcher] Fatal error during startup: ${err}`);
   process.exit(1);
 });

@@ -25,62 +25,96 @@ Why? Your assistant needs to:
 
 - A dedicated machine (VPS, VM, Raspberry Pi, etc.)
 - Node.js 22+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 
 ## Quick Start
 
-### 1. Clone the repository
+### 1. Clone the repositories
 
 ```bash
+# Clone both repos side by side
 git clone https://github.com/pHouse-Productions/pHouseClawd.git
-cd pHouseClawd
+git clone https://github.com/pHouse-Productions/pHouseMcp.git
 ```
 
-### 2. Run Claude Code with full access
+### 2. Install and authenticate Claude Code
+
+Install Claude Code CLI following the [official docs](https://docs.anthropic.com/en/docs/claude-code).
 
 ```bash
+# Install Claude Code
+npm install -g @anthropic-ai/claude-code
+
+# Authenticate with your Anthropic account
+claude
+```
+
+Follow the prompts to log in. This is a one-time setup that stores your credentials locally.
+
+### 3. Authenticate GitHub CLI
+
+The assistant uses GitHub for version control and deployments. Install and authenticate the GitHub CLI:
+
+```bash
+# Install GitHub CLI (if not already installed)
+# On Ubuntu/Debian:
+sudo apt install gh
+
+# Authenticate
+gh auth login
+```
+
+Follow the prompts to log in with your GitHub account.
+
+### 4. Start the assistant
+
+```bash
+cd pHouseClawd
 claude --dangerously-skip-permissions
 ```
 
 The `--dangerously-skip-permissions` flag lets Claude operate autonomously without prompting for every action. This is required for the assistant to function properly.
 
-### 3. Tell Claude what you want
+### 5. Tell Claude what you want
 
 Just describe what you're trying to do:
 
 > "Hey, I want to set up a personal assistant. My name is [name], my email is [email]. I want to use Telegram and Gmail."
 
 Claude will:
-- Walk you through getting API keys and credentials
+- Walk you through the initial setup
 - Install dependencies
 - Create your personalized `CLAUDE.md` configuration
 - Set up MCP servers for your integrations
-- Create necessary directories
 - Get everything running
+
+### 6. Configure via Dashboard
+
+Once running, access the dashboard at `http://localhost:3000` (or your server's IP).
+
+All remaining configuration is done through the dashboard:
+- **Telegram** - Bot token
+- **Google APIs** - OAuth credentials, Places API key
+- **Google Account** - One-click OAuth connection for Gmail, Calendar, Drive, etc.
+- **AI Services** - OpenRouter API key for image generation
+- **Channels** - Enable/disable Telegram, Gmail, Google Chat
+- **Email Security** - Trusted email addresses
+- **Assistant Identity** - Edit CLAUDE.md directly
 
 ## What Claude Will Help You Set Up
 
-**Telegram Bot:**
-- Create a bot via @BotFather
-- Configure your bot token and chat ID
-- Start the Telegram daemon
+During initial setup, Claude will walk you through:
 
-**Gmail (optional):**
-- Set up Google Cloud OAuth credentials
-- Run the authentication flow
-- Configure the Gmail MCP server
+1. **Creating a Telegram bot** via @BotFather
+2. **Setting up Google Cloud** project and OAuth credentials
+3. **Installing dependencies** for pHouseClawd and pHouseMcp
+4. **Creating your CLAUDE.md** with your personal info and preferences
+5. **Starting the assistant** with all daemons running
 
-**Google Chat (optional):**
-- Requires Google Workspace or personal Gmail with Chat enabled
-- See "Google Chat Setup" section below for detailed steps
-
-**Image Generation (optional):**
-- Get an OpenRouter API key
-- Configure the image generation MCP server
-
-**Scheduled Tasks:**
-- Set up cron jobs for recurring tasks
-- Morning briefings, reminders, whatever you want
+After initial setup, use the **dashboard** to:
+- Enter API keys and tokens
+- Connect your Google account (one-click OAuth)
+- Configure channels and security settings
+- Manage scheduled tasks
 
 ## Project Structure
 
@@ -170,31 +204,39 @@ For web browsing and automation, we recommend the **Playwright MCP**:
 This gives your assistant the ability to browse websites, take screenshots, fill forms, and automate web tasks. It's well-maintained and works great out of the box.
 
 4. **For Google services**, you'll need OAuth credentials:
-   - Create a project in Google Cloud Console
-   - Enable the APIs (Gmail, Docs, Sheets, Drive)
-   - Create OAuth 2.0 credentials (Desktop app)
+   - Create a project in [Google Cloud Console](https://console.cloud.google.com)
+   - Enable the APIs you want (Gmail, Calendar, Docs, Sheets, Drive, etc.)
+   - Create OAuth 2.0 credentials (Desktop app type)
    - Download as `client_secret.json` to `pHouseMcp/credentials/`
-   - Run the auth flow to generate `tokens.json`
+   - Add `http://localhost:3000/api/oauth/google/callback` as an authorized redirect URI
+   - Use the dashboard's "Connect Google Account" button to complete the OAuth flow
 
 ## Configuration
 
-All configuration is managed by Claude through JSON files in the `config/` directory. You don't need to edit these manually - just tell Claude what you want and it will update the configs.
+Configuration is managed through the **web dashboard** at `http://localhost:3000`. The dashboard lets you:
 
-**Configuration files (all gitignored, created by Claude during setup):**
+- Set API keys (Telegram, Google, OpenRouter)
+- Connect your Google account via OAuth
+- Enable/disable channels (Telegram, Gmail, Google Chat)
+- Manage trusted email addresses
+- Edit your assistant's personality (CLAUDE.md)
+- View and manage scheduled tasks
+
+You can also tell Claude directly what you want:
+- "Add john@example.com to my trusted email list"
+- "Remind me to check my calendar every morning at 9am"
+- "Update my address to 123 Main St"
+
+**Configuration files (all gitignored):**
 
 | File | Purpose |
 |------|---------|
 | `CLAUDE.md` | Your assistant's personality, your info, preferences |
 | `config/cron.json` | Scheduled tasks and reminders |
+| `config/channels.json` | Enabled communication channels |
 | `config/email-security.json` | Trusted email addresses for auto-reply |
 | `config/gchat-security.json` | Whitelisted Google Chat spaces |
-
-**Example commands:**
-- "Add john@example.com to my trusted email list"
-- "Remind me to check my calendar every morning at 9am"
-- "Update my address to 123 Main St"
-
-Claude reads and writes these files directly - no manual editing needed.
+| `dashboard/.env.local` | Dashboard password and URL |
 
 ## Email Security
 
@@ -347,7 +389,18 @@ Press Ctrl+C to stop everything.
 
 ## Dashboard
 
-Your assistant comes with a web dashboard at `http://your-server:3000`. Claude will generate a password during setup - it'll tell you what it is.
+Your assistant comes with a web dashboard at `http://localhost:3000` (or your server's IP on port 3000).
+
+**Features:**
+- **Home** - System status and quick actions
+- **Jobs** - View running and completed tasks
+- **Cron** - Manage scheduled tasks
+- **Memory** - View short-term and long-term memory
+- **Logs** - Application logs for debugging
+- **Skills** - Available slash commands
+- **Config** - All API keys, OAuth, and settings
+
+Claude will generate a dashboard password during setup. You can change it anytime in the Config page.
 
 ## Updating
 

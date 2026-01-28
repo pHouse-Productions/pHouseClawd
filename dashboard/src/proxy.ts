@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Only protect /api routes (except auth/verify)
-  if (pathname.startsWith("/api") && !pathname.startsWith("/api/auth")) {
+  // Only protect /api routes (except auth and oauth)
+  if (pathname.startsWith("/api") && !pathname.startsWith("/api/auth") && !pathname.startsWith("/api/oauth")) {
     const password = request.headers.get("X-Dashboard-Auth");
     const correctPassword = process.env.DASHBOARD_PASSWORD;
 
