@@ -13,7 +13,13 @@ export default function MarkdownRenderer({ content }: { content: string }) {
         prose-strong:text-white
         prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
         prose-code:text-pink-400 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-        prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700"
+        prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:overflow-x-auto prose-pre:whitespace-pre-wrap prose-pre:break-all
+        prose-code:break-all"
+      style={{
+        wordWrap: "break-word",
+        overflowWrap: "anywhere",
+        wordBreak: "break-word",
+      }}
     >
       <ReactMarkdown>{content}</ReactMarkdown>
     </div>

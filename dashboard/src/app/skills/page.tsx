@@ -60,8 +60,8 @@ export default function SkillsPage() {
               href={`/skills/${encodeURIComponent(skill.name)}`}
               className="flex items-center justify-between bg-zinc-900 rounded-lg border border-zinc-800 p-4 active:bg-zinc-800"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 flex-shrink-0 rounded-full bg-purple-500/20 flex items-center justify-center">
                   <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>

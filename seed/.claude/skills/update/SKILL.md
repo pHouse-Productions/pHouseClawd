@@ -1,3 +1,8 @@
+---
+name: update
+description: Pull the latest updates from pHouseClawd and pHouseMcp repos, then review the seed template for any new features or instructions.
+---
+
 # Update Skill
 
 ## Purpose

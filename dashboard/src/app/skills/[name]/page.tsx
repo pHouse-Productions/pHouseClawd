@@ -82,17 +82,17 @@ export default function SkillDetailPage({ params }: { params: Promise<{ name: st
 
       {/* Description Card */}
       {skill.description && (
-        <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-          <p className="text-zinc-300">{skill.description}</p>
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4 overflow-hidden">
+          <p className="text-zinc-300 break-words">{skill.description}</p>
         </div>
       )}
 
       {/* Content */}
-      <div className="bg-zinc-900 rounded-lg border border-zinc-800">
+      <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-800">
           <h3 className="text-sm font-semibold text-white">SKILL.md</h3>
         </div>
-        <div className="p-4 md:p-6">
+        <div className="p-4 md:p-6 overflow-hidden">
           <MarkdownRenderer content={skill.content} />
         </div>
       </div>
