@@ -25,7 +25,11 @@ function log(message: string) {
 
 function getOAuth2Client() {
   const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf-8"));
-  const { client_id, client_secret } = credentials.installed;
+  const creds = credentials.installed || credentials.web;
+  if (!creds) {
+    throw new Error("Invalid credentials file: must contain 'installed' or 'web' key");
+  }
+  const { client_id, client_secret } = creds;
 
   const oauth2Client = new google.auth.OAuth2(
     client_id,

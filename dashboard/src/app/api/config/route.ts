@@ -26,7 +26,7 @@ export const CONFIG_SCHEMA = {
 Note: You'll also need to message your bot once and get your Chat ID. Send any message to your bot, then visit:
 https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
 Look for "chat":{"id":XXXXXXXX} - that number is your Chat ID.`,
-      required: true,
+      required: false,
       sensitive: true,
     },
   },
@@ -228,7 +228,13 @@ export async function GET() {
         expiry: googleTokenExpiry,
         raw: googleToken ? JSON.stringify(googleToken, null, 2) : "",
       },
-      channels: channelsConfig,
+      channels: channelsConfig || {
+        channels: {
+          telegram: { enabled: false },
+          email: { enabled: false },
+          gchat: { enabled: false },
+        },
+      },
       emailSecurity: emailSecurityConfig,
       claudeMd: claudeMd,
     });

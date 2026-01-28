@@ -710,24 +710,35 @@ export default function ConfigPage() {
         <p className="text-zinc-500 text-xs mb-4">Enable or disable communication channels</p>
         {config.channels?.channels &&
           Object.entries(config.channels.channels).map(([channel, settings]) => (
-            <div key={channel} className="flex items-center justify-between py-2">
-              <span className="text-white capitalize">{channel}</span>
-              <button
-                onClick={() => {
-                  const newChannels = { ...config.channels!.channels };
-                  newChannels[channel] = { enabled: !settings.enabled };
-                  saveChannels(newChannels);
-                }}
-                className={`relative w-11 h-6 rounded-full transition-colors ${
-                  settings.enabled ? "bg-green-600" : "bg-zinc-700"
-                }`}
-              >
-                <div
-                  className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                    settings.enabled ? "translate-x-6" : "translate-x-1"
+            <div key={channel} className="border-b border-zinc-800 last:border-0 py-3 first:pt-0">
+              <div className="flex items-center justify-between">
+                <span className="text-white capitalize">{channel === "gchat" ? "Google Chat" : channel}</span>
+                <button
+                  onClick={() => {
+                    const newChannels = { ...config.channels!.channels };
+                    newChannels[channel] = { enabled: !settings.enabled };
+                    saveChannels(newChannels);
+                  }}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${
+                    settings.enabled ? "bg-green-600" : "bg-zinc-700"
                   }`}
-                />
-              </button>
+                >
+                  <div
+                    className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
+                      settings.enabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
+              {channel === "gchat" && settings.enabled && (
+                <div className="mt-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded text-xs text-yellow-200">
+                  <p className="font-medium mb-1">Setup required:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-yellow-200/80">
+                    <li>Enable Google Chat in your Google Workspace account</li>
+                    <li>Send a message to the assistant - you&apos;ll need to accept a prompt in the Google Chat UI to start the conversation</li>
+                  </ol>
+                </div>
+              )}
             </div>
           ))}
       </ConfigSection>

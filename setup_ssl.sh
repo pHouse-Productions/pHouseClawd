@@ -4,8 +4,30 @@ set -e
 echo "=== SSL Setup for pHouseClawd Dashboard ==="
 echo ""
 
-# Ask for domain
-read -p "Enter your domain (e.g., vito.yourdomain.com): " DOMAIN
+# Parse arguments
+DOMAIN=""
+NO_PROMPT=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --domain)
+            DOMAIN="$2"
+            shift 2
+            ;;
+        --no-prompt)
+            NO_PROMPT=true
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Ask for domain if not provided
+if [ -z "$DOMAIN" ]; then
+    read -p "Enter your domain (e.g., vito.yourdomain.com): " DOMAIN
+fi
 
 if [ -z "$DOMAIN" ]; then
     echo "Error: Domain cannot be empty"

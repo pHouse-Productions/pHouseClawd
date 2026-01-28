@@ -146,17 +146,14 @@ if [ -d "dashboard" ]; then
         if [ -n "$DASHBOARD_DOMAIN" ]; then
             echo "DASHBOARD_URL=$DASHBOARD_DOMAIN" >> .env.local
         fi
+    else
+        # Read existing domain from .env.local
+        DASHBOARD_DOMAIN=$(grep "DASHBOARD_URL" .env.local | cut -d'=' -f2)
     fi
 
-    # Ask for auth service URL if not already set
+    # Set auth service URL (centralized OAuth)
     if ! grep -q "AUTH_SERVICE_URL" .env.local 2>/dev/null; then
-        echo ""
-        echo "If you have a centralized pHouseClawdAuth service, enter its URL."
-        echo "This lets you use one Google OAuth app for all your instances."
-        read -p "Auth service URL (leave blank to skip): " AUTH_SERVICE
-        if [ -n "$AUTH_SERVICE" ]; then
-            echo "AUTH_SERVICE_URL=$AUTH_SERVICE" >> .env.local
-        fi
+        echo "AUTH_SERVICE_URL=https://auth.rl-quests.com" >> .env.local
     fi
 
     # Show the generated password
@@ -226,20 +223,22 @@ sudo systemctl enable phouseclawd
 echo "pHouseClawd service enabled (will start on boot)."
 
 # ============================================
-# Step 10: Authenticate GitHub CLI
+# Step 10: Authenticate GitHub CLI (Optional)
 # ============================================
 echo ""
-print_step "GitHub CLI Authentication"
+print_step "GitHub CLI Authentication (Optional)"
 echo ""
 
 if gh auth status &> /dev/null; then
     echo "GitHub CLI already authenticated."
 else
-    echo "You need to authenticate with GitHub."
-    echo "This allows the assistant to create repos, push code, etc."
-    echo ""
-    read -p "Press Enter to start GitHub authentication..."
-    gh auth login
+    echo "GitHub authentication allows the assistant to create repos, push code, etc."
+    read -p "Would you like to set up GitHub authentication? (y/n): " SETUP_GITHUB
+    if [[ "$SETUP_GITHUB" =~ ^[Yy]$ ]]; then
+        gh auth login
+    else
+        echo "Skipping GitHub setup. You can run 'gh auth login' later."
+    fi
 fi
 
 # ============================================
@@ -248,9 +247,11 @@ fi
 echo ""
 print_step "Claude Code Authentication"
 echo ""
+echo "You'll need to accept the terms and log in to Claude Code."
+echo ""
 
-claude setup-token || {
-    print_warning "Run 'claude setup-token' manually to complete authentication."
+claude --dangerously-skip-permissions || {
+    print_warning "Run 'claude --dangerously-skip-permissions' manually to complete setup."
 }
 
 # ============================================
@@ -284,12 +285,20 @@ echo ""
 read -p "Have you completed both steps above? (y/n): " DNS_READY
 
 if [[ "$DNS_READY" =~ ^[Yy]$ ]]; then
-    # Run SSL setup
-    "$SCRIPT_DIR/setup_ssl.sh"
+    # Run SSL setup, passing domain if we have it
+    if [ -n "$DASHBOARD_DOMAIN" ]; then
+        "$SCRIPT_DIR/setup_ssl.sh" --domain "$DASHBOARD_DOMAIN" --no-prompt
+    else
+        "$SCRIPT_DIR/setup_ssl.sh"
+    fi
 else
     echo ""
     echo "Skipping SSL setup. You can run it later with:"
-    echo "  ./setup_ssl.sh"
+    if [ -n "$DASHBOARD_DOMAIN" ]; then
+        echo "  ./setup_ssl.sh --domain $DASHBOARD_DOMAIN"
+    else
+        echo "  ./setup_ssl.sh"
+    fi
 fi
 
 # ============================================
@@ -300,23 +309,27 @@ echo "=============================================="
 echo -e "${GREEN}   Installation Complete!${NC}"
 echo "=============================================="
 echo ""
+
+# Show dashboard credentials
+DASHBOARD_PASSWORD=$(grep "DASHBOARD_PASSWORD" "$SCRIPT_DIR/dashboard/.env.local" 2>/dev/null | cut -d'=' -f2)
+if [ -n "$DASHBOARD_PASSWORD" ]; then
+    echo -e "Dashboard password: ${YELLOW}${DASHBOARD_PASSWORD}${NC}"
+    echo ""
+fi
+
 echo "Next steps:"
 echo ""
 echo "1. Configure your assistant via the dashboard:"
-if [[ "$DNS_READY" =~ ^[Yy]$ ]]; then
-    echo "   https://your-domain.com"
+if [[ "$DNS_READY" =~ ^[Yy]$ ]] && [ -n "$DASHBOARD_DOMAIN" ]; then
+    echo "   https://$DASHBOARD_DOMAIN"
+elif [ -n "$DASHBOARD_DOMAIN" ]; then
+    echo "   http://$DASHBOARD_DOMAIN:3000"
 else
     echo "   http://localhost:3000 (or your EC2 IP:3000)"
 fi
 echo ""
 echo "2. Start the assistant:"
 echo "   ./restart.sh"
-echo ""
-echo "3. Or run Claude Code directly:"
-echo "   claude --dangerously-skip-permissions"
-echo ""
-echo "4. Customize your assistant's personality:"
-echo "   Edit CLAUDE.md (or use the dashboard)"
 echo ""
 echo "Useful commands:"
 echo "  ./restart.sh              - Start/restart the assistant"
