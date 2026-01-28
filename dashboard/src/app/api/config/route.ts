@@ -6,6 +6,7 @@ const PROJECT_ROOT = process.env.PHOUSE_PROJECT_ROOT || path.resolve(process.cwd
 const MCP_ROOT = path.resolve(PROJECT_ROOT, "../pHouseMcp");
 const MCP_ENV_FILE = path.join(MCP_ROOT, ".env");
 const GOOGLE_TOKEN_FILE = path.join(MCP_ROOT, "credentials/tokens.json");
+const GOOGLE_CREDENTIALS_FILE = path.join(MCP_ROOT, "credentials/client_secret.json");
 const DASHBOARD_ENV_FILE = path.join(PROJECT_ROOT, "dashboard/.env.local");
 const CHANNELS_CONFIG = path.join(PROJECT_ROOT, "config/channels.json");
 const EMAIL_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/email-security.json");
@@ -147,14 +148,27 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
 export async function GET() {
   try {
     // Read all config sources
-    const [envVars, dashboardVars, googleToken, channelsConfig, emailSecurityConfig, claudeMd] = await Promise.all([
+    const [envVars, dashboardVars, googleToken, googleCredentials, channelsConfig, emailSecurityConfig, claudeMd] = await Promise.all([
       parseEnvFile(MCP_ENV_FILE),
       parseEnvFile(DASHBOARD_ENV_FILE),
       readJsonFile(GOOGLE_TOKEN_FILE),
+      readJsonFile(GOOGLE_CREDENTIALS_FILE),
       readJsonFile(CHANNELS_CONFIG),
       readJsonFile(EMAIL_SECURITY_CONFIG),
       fs.readFile(CLAUDE_MD_FILE, "utf-8").catch(() => ""),
     ]);
+
+    // Extract Google credentials from JSON file if present
+    let googleClientId = envVars.GOOGLE_CLIENT_ID || "";
+    let googleClientSecret = envVars.GOOGLE_CLIENT_SECRET || "";
+    if (googleCredentials && typeof googleCredentials === "object") {
+      const creds = googleCredentials as Record<string, unknown>;
+      const installed = (creds.installed || creds.web) as Record<string, string> | undefined;
+      if (installed) {
+        googleClientId = googleClientId || installed.client_id || "";
+        googleClientSecret = googleClientSecret || installed.client_secret || "";
+      }
+    }
 
     // Helper to mask sensitive values
     const maskValue = (value: string | undefined, sensitive: boolean): string => {
@@ -170,9 +184,13 @@ export async function GET() {
       telegramVars[key] = maskValue(envVars[key], schema.sensitive);
     }
 
+    // Google vars - use credentials from JSON file as fallback
     const googleVars: Record<string, string> = {};
     for (const [key, schema] of Object.entries(CONFIG_SCHEMA.google)) {
-      googleVars[key] = maskValue(envVars[key], schema.sensitive);
+      let value = envVars[key];
+      if (key === "GOOGLE_CLIENT_ID") value = googleClientId;
+      else if (key === "GOOGLE_CLIENT_SECRET") value = googleClientSecret;
+      googleVars[key] = maskValue(value, schema.sensitive);
     }
 
     const aiVars: Record<string, string> = {};
@@ -235,6 +253,32 @@ export async function POST(request: NextRequest) {
 
     switch (type) {
       case "env": {
+        // Google Client ID and Secret go to credentials JSON file
+        if (key === "GOOGLE_CLIENT_ID" || key === "GOOGLE_CLIENT_SECRET") {
+          let creds = await readJsonFile(GOOGLE_CREDENTIALS_FILE) as Record<string, unknown> | null;
+          if (!creds) {
+            creds = { installed: { client_id: "", client_secret: "", redirect_uris: ["http://localhost"] } };
+          }
+          const installed = (creds.installed || creds.web || {}) as Record<string, unknown>;
+          if (key === "GOOGLE_CLIENT_ID") {
+            installed.client_id = value || "";
+          } else {
+            installed.client_secret = value || "";
+          }
+          if (creds.installed) {
+            creds.installed = installed;
+          } else if (creds.web) {
+            creds.web = installed;
+          } else {
+            creds.installed = installed;
+          }
+          // Ensure credentials directory exists
+          await fs.mkdir(path.dirname(GOOGLE_CREDENTIALS_FILE), { recursive: true });
+          await writeJsonFile(GOOGLE_CREDENTIALS_FILE, creds);
+          return NextResponse.json({ success: true, message: `Updated ${key}. Restart required.` });
+        }
+
+        // Other env vars go to .env file
         const vars = await parseEnvFile(MCP_ENV_FILE);
         if (value === null || value === "") {
           delete vars[key];
