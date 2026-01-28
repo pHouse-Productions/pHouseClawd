@@ -62,3 +62,9 @@ websites/
 
 # Claude skills (personal workflows)
 .claude/
+
+# Runtime files
+listeners/gchat/last_message_time.txt
+
+# User files
+vito-avatar.png
