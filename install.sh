@@ -29,7 +29,22 @@ print_error() {
 }
 
 # ============================================
-# Step 1: System Dependencies
+# Step 1: Assistant Name
+# ============================================
+echo "What would you like to name your assistant?"
+read -p "Assistant name: " ASSISTANT_NAME
+
+if [ -z "$ASSISTANT_NAME" ]; then
+    ASSISTANT_NAME="pHouseClawd"
+fi
+
+# Configure git identity for this assistant
+git config --global user.name "$ASSISTANT_NAME"
+git config --global user.email "${ASSISTANT_NAME,,}@phouse.bot"
+echo "Git configured as: $ASSISTANT_NAME <${ASSISTANT_NAME,,}@phouse.bot>"
+
+# ============================================
+# Step 2: System Dependencies
 # ============================================
 print_step "Installing system dependencies..."
 
@@ -37,7 +52,7 @@ sudo apt update
 sudo apt install -y curl git build-essential
 
 # ============================================
-# Step 2: Node.js 22+
+# Step 3: Node.js 22+
 # ============================================
 print_step "Checking Node.js..."
 
@@ -59,7 +74,7 @@ fi
 echo "Node.js $(node -v) installed."
 
 # ============================================
-# Step 3: GitHub CLI
+# Step 4: GitHub CLI
 # ============================================
 print_step "Checking GitHub CLI..."
 
@@ -75,7 +90,7 @@ else
 fi
 
 # ============================================
-# Step 4: Claude Code CLI
+# Step 5: Claude Code CLI
 # ============================================
 print_step "Checking Claude Code CLI..."
 
@@ -87,7 +102,7 @@ else
 fi
 
 # ============================================
-# Step 5: Clone pHouseMcp (if not exists)
+# Step 6: Clone pHouseMcp (if not exists)
 # ============================================
 print_step "Checking pHouseMcp repository..."
 
@@ -99,7 +114,7 @@ else
 fi
 
 # ============================================
-# Step 6: Install npm dependencies
+# Step 7: Install npm dependencies
 # ============================================
 print_step "Installing pHouseMcp dependencies..."
 cd "$PARENT_DIR/pHouseMcp"
@@ -169,7 +184,7 @@ for listener in listeners/*/; do
 done
 
 # ============================================
-# Step 7: Create pHouseMcp credentials directory
+# Step 8: Create pHouseMcp credentials directory
 # ============================================
 print_step "Setting up pHouseMcp credentials directory..."
 mkdir -p "$PARENT_DIR/pHouseMcp/credentials"
@@ -185,7 +200,7 @@ if [ ! -f "$PARENT_DIR/pHouseMcp/.env" ]; then
 fi
 
 # ============================================
-# Step 8: Create pHouseClawd systemd service
+# Step 9: Create pHouseClawd systemd service
 # ============================================
 print_step "Setting up pHouseClawd systemd service..."
 
@@ -211,7 +226,7 @@ sudo systemctl enable phouseclawd
 echo "pHouseClawd service enabled (will start on boot)."
 
 # ============================================
-# Step 9: Authenticate GitHub CLI
+# Step 10: Authenticate GitHub CLI
 # ============================================
 echo ""
 print_step "GitHub CLI Authentication"
@@ -228,7 +243,7 @@ else
 fi
 
 # ============================================
-# Step 10: Authenticate Claude Code
+# Step 11: Authenticate Claude Code
 # ============================================
 echo ""
 print_step "Claude Code Authentication"
@@ -239,7 +254,7 @@ claude setup-token || {
 }
 
 # ============================================
-# Step 11: SSL Setup
+# Step 12: SSL Setup
 # ============================================
 echo ""
 echo "=============================================="
