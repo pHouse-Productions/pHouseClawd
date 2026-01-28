@@ -141,12 +141,14 @@ if (!fs.existsSync(LOGS_DIR)) {
 }
 
 // Session management
-type ChannelMode = "session" | "transcript";
+type MemoryMode = "session" | "transcript";
+type QueueMode = "queue" | "interrupt";
 
 interface SessionData {
   known: string[];
   generations: Record<string, number>;
-  modes: Record<string, ChannelMode>; // Per-channel mode (session vs transcript)
+  modes: Record<string, MemoryMode>; // Per-channel memory mode (session vs transcript)
+  queueModes: Record<string, QueueMode>; // Per-channel queue mode (queue vs interrupt)
 }
 
 function loadSessionData(): SessionData {
@@ -154,21 +156,31 @@ function loadSessionData(): SessionData {
     if (fs.existsSync(SESSIONS_FILE)) {
       const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf-8"));
       if (Array.isArray(data)) {
-        return { known: data, generations: {}, modes: {} };
+        return { known: data, generations: {}, modes: {}, queueModes: {} };
       }
-      return { ...data, modes: data.modes || {} };
+      return { ...data, modes: data.modes || {}, queueModes: data.queueModes || {} };
     }
   } catch {}
-  return { known: [], generations: {}, modes: {} };
+  return { known: [], generations: {}, modes: {}, queueModes: {} };
 }
 
-function getChannelMode(sessionKey: string): ChannelMode {
+function getMemoryMode(sessionKey: string): MemoryMode {
   return loadSessionData().modes[sessionKey] || "session"; // Default to session mode
 }
 
-function setChannelMode(sessionKey: string, mode: ChannelMode): void {
+function setMemoryMode(sessionKey: string, mode: MemoryMode): void {
   const data = loadSessionData();
   data.modes[sessionKey] = mode;
+  saveSessionData(data);
+}
+
+function getQueueMode(sessionKey: string): QueueMode {
+  return loadSessionData().queueModes[sessionKey] || "queue"; // Default to queue mode
+}
+
+function setQueueMode(sessionKey: string, mode: QueueMode): void {
+  const data = loadSessionData();
+  data.queueModes[sessionKey] = mode;
   saveSessionData(data);
 }
 
@@ -231,6 +243,8 @@ interface JobData {
 
 // Track running Claude processes for kill capability
 const runningJobs: Map<string, ChildProcess> = new Map();
+// Track which session each job belongs to (for interrupt mode)
+const jobToSession: Map<string, string> = new Map();
 
 function generateJobId(): string {
   const now = new Date();
@@ -293,8 +307,9 @@ function finalizeJob(jobId: string, status: "completed" | "error" | "stopped", c
   } catch (err) {
     log(`[Jobs] Error finalizing ${jobId}: ${err}`);
   }
-  // Clean up from running jobs map
+  // Clean up from running jobs map and session tracking
   runningJobs.delete(jobId);
+  jobToSession.delete(jobId);
 }
 
 // Kill a running job by ID
@@ -330,6 +345,16 @@ function killJob(jobId: string): boolean {
 function getRunningJobId(): string | null {
   for (const [jobId] of runningJobs) {
     return jobId;
+  }
+  return null;
+}
+
+// Get the running job ID for a specific session (for interrupt mode)
+function getRunningJobForSession(sessionKey: string): string | null {
+  for (const [jobId, sessKey] of jobToSession) {
+    if (sessKey === sessionKey && runningJobs.has(jobId)) {
+      return jobId;
+    }
   }
   return null;
 }
@@ -640,26 +665,50 @@ async function handleChannelEvent(
       return;
     }
 
-    // Mode switching commands
-    if (text === "/mode session" || text === "/mode transcript") {
-      const newMode = text === "/mode session" ? "session" : "transcript";
-      setChannelMode(sessionKey, newMode);
-      log(`[Watcher] Mode changed to ${newMode} for ${sessionKey}`);
+    // Memory mode commands (session vs transcript)
+    if (text === "/memory session" || text === "/memory transcript") {
+      const newMode = text === "/memory session" ? "session" : "transcript";
+      setMemoryMode(sessionKey, newMode);
+      log(`[Watcher] Memory mode changed to ${newMode} for ${sessionKey}`);
       const handler = channel.createHandler(event);
       handler.onComplete(0);
       if (newMode === "session") {
-        sendReply("Switched to session mode. I'll remember our conversation within this session.");
+        sendReply("Switched to session memory. I'll remember our conversation within this session.");
       } else {
-        sendReply("Switched to transcript mode. Each message is a fresh session, but I'll see recent history from all channels.");
+        sendReply("Switched to transcript memory. Each message is a fresh session, but I'll see recent history from all channels.");
       }
       return;
     }
 
-    if (text === "/mode") {
-      const currentMode = getChannelMode(sessionKey);
+    if (text === "/memory") {
+      const currentMode = getMemoryMode(sessionKey);
       const handler = channel.createHandler(event);
       handler.onComplete(0);
-      sendReply(`Current mode: ${currentMode}\n\nUse /mode session or /mode transcript to switch.`);
+      sendReply(`Memory mode: ${currentMode}\n\nUse /memory session or /memory transcript to switch.`);
+      return;
+    }
+
+    // Queue mode commands (queue vs interrupt)
+    if (text === "/queue on" || text === "/queue off") {
+      const newMode = text === "/queue on" ? "queue" : "interrupt";
+      setQueueMode(sessionKey, newMode);
+      log(`[Watcher] Queue mode changed to ${newMode} for ${sessionKey}`);
+      const handler = channel.createHandler(event);
+      handler.onComplete(0);
+      if (newMode === "queue") {
+        sendReply("Queue mode ON. Messages will pile up and process after the current job finishes.");
+      } else {
+        sendReply("Queue mode OFF (interrupt). New messages will kill the current job and start fresh.");
+      }
+      return;
+    }
+
+    if (text === "/queue") {
+      const currentMode = getQueueMode(sessionKey);
+      const handler = channel.createHandler(event);
+      handler.onComplete(0);
+      const status = currentMode === "queue" ? "ON (messages queue up)" : "OFF (messages interrupt)";
+      sendReply(`Queue mode: ${status}\n\nUse /queue on or /queue off to switch.`);
       return;
     }
 
@@ -704,9 +753,9 @@ async function handleChannelEvent(
     }
   }
 
-  // Check channel mode
-  const channelMode = getChannelMode(sessionKey);
-  const isTranscriptMode = channelMode === "transcript";
+  // Check memory mode
+  const memoryMode = getMemoryMode(sessionKey);
+  const isTranscriptMode = memoryMode === "transcript";
 
   // Generate session ID
   const generation = getSessionGeneration(sessionKey);
@@ -733,7 +782,7 @@ async function handleChannelEvent(
   const jobId = generateJobId();
 
   return new Promise((resolve, reject) => {
-    log(`[Watcher] Spawning Claude with session ${sessionId} (mode: ${channelMode}, ${useNewSession ? "new" : "resuming"}) [job: ${jobId}]`);
+    log(`[Watcher] Spawning Claude with session ${sessionId} (mode: ${memoryMode}, ${useNewSession ? "new" : "resuming"}) [job: ${jobId}]`);
 
     const sessionArg = useNewSession
       ? ["--session-id", isTranscriptMode ? generateSessionId(`${sessionKey}-transcript-${Date.now()}`) : sessionId]
@@ -756,9 +805,10 @@ async function handleChannelEvent(
       }
     );
 
-    // Track PID in job file and in-memory map
+    // Track PID in job file and in-memory map, plus session mapping
     createJobFile(jobId, channel.name, prompt.slice(0, 500), proc.pid);
     runningJobs.set(jobId, proc);
+    jobToSession.set(jobId, sessionKey);
 
     let stdout = "";
     let stderr = "";
@@ -916,13 +966,52 @@ async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Pr
   // Check concurrency
   if (channel.concurrency === "session" || channel.concurrency === "global") {
     if (activeSessions.has(lockKey)) {
-      // Queue this event
-      if (!eventQueues.has(lockKey)) {
-        eventQueues.set(lockKey, []);
+      // Check queue mode for this session
+      const queueMode = getQueueMode(sessionKey);
+
+      if (queueMode === "interrupt") {
+        // Interrupt mode: kill current job, clear queue, process this one
+        log(`[Watcher] Interrupt mode: killing running job for ${lockKey}`);
+
+        // Kill the running job for this session
+        const runningJobId = getRunningJobForSession(sessionKey);
+        if (runningJobId) {
+          killJob(runningJobId);
+          log(`[Watcher] Killed job ${runningJobId} due to interrupt mode`);
+        }
+
+        // Clear any queued events for this session
+        const queue = eventQueues.get(lockKey);
+        if (queue && queue.length > 0) {
+          log(`[Watcher] Clearing ${queue.length} queued events due to interrupt mode`);
+          eventQueues.delete(lockKey);
+        }
+
+        // Wait a tiny bit for the kill to complete, then continue
+        // The activeSessions will be cleared by the killed job's finally block
+        // So we need to wait for that before we can proceed
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Now check again - if still active, wait a bit more
+        if (activeSessions.has(lockKey)) {
+          log(`[Watcher] Waiting for interrupted job to clean up...`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        // If STILL active (shouldn't happen), force clean up
+        if (activeSessions.has(lockKey)) {
+          log(`[Watcher] Force clearing active session lock for ${lockKey}`);
+          activeSessions.delete(lockKey);
+        }
+      } else {
+        // Queue mode: queue this event
+        if (!eventQueues.has(lockKey)) {
+          eventQueues.set(lockKey, []);
+        }
+        eventQueues.get(lockKey)!.push(event);
+        log(`[Watcher] Queued event for ${lockKey} (${eventQueues.get(lockKey)!.length} in queue)`);
+        return;
       }
-      eventQueues.get(lockKey)!.push(event);
-      log(`[Watcher] Queued event for ${lockKey} (${eventQueues.get(lockKey)!.length} in queue)`);
-      return;
     }
     activeSessions.add(lockKey);
   }
