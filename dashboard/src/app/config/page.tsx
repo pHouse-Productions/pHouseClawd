@@ -46,11 +46,11 @@ interface ConfigData {
 
 function ConfigSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-zinc-900 rounded-lg border border-zinc-800">
+    <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
       <div className="px-4 py-3 border-b border-zinc-800">
         <h3 className="text-sm font-semibold text-white">{title}</h3>
       </div>
-      <div className="p-4 space-y-4">{children}</div>
+      <div className="p-4 space-y-4 overflow-x-auto">{children}</div>
     </div>
   );
 }
@@ -255,7 +255,7 @@ function GoogleCredentialsEditor({
       ) : (
         <div>
           {rawCredentials ? (
-            <pre className="p-3 bg-zinc-800 rounded text-xs text-zinc-300 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">
+            <pre className="p-3 bg-zinc-800 rounded text-xs text-zinc-300 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
               {rawCredentials}
             </pre>
           ) : (
@@ -397,7 +397,7 @@ function GoogleTokenEditor({
       ) : (
         <div>
           {rawToken ? (
-            <pre className="p-3 bg-zinc-800 rounded text-xs text-zinc-300 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">
+            <pre className="p-3 bg-zinc-800 rounded text-xs text-zinc-300 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
               {rawToken}
             </pre>
           ) : (
@@ -885,7 +885,7 @@ function ClaudeMdEditor({
   if (!editing) {
     return (
       <div>
-        <pre className="p-3 bg-zinc-800 rounded text-xs text-zinc-300 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto">
+        <pre className="p-3 bg-zinc-800 rounded text-xs text-zinc-300 font-mono whitespace-pre-wrap break-all max-h-64 overflow-y-auto">
           {content.slice(0, 2000)}
           {content.length > 2000 && "..."}
         </pre>
