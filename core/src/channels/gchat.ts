@@ -18,6 +18,36 @@ const SEND_SCRIPT = path.join(PROJECT_ROOT, "listeners/gchat/send-message.ts");
 
 const POLL_INTERVAL = 10000; // Check every 10 seconds
 
+// Module-level tracking for sent messages to prevent echo loops
+// Key: normalized message text, Value: timestamp
+const sentMessageTexts = new Map<string, number>();
+const SENT_MESSAGE_ECHO_WINDOW_MS = 60000; // 1 minute window
+
+function trackSentMessage(text: string) {
+  const key = text.trim().toLowerCase();
+  sentMessageTexts.set(key, Date.now());
+  // Clean up old entries and limit size
+  const now = Date.now();
+  for (const [k, timestamp] of sentMessageTexts) {
+    if (now - timestamp > SENT_MESSAGE_ECHO_WINDOW_MS) {
+      sentMessageTexts.delete(k);
+    }
+  }
+  if (sentMessageTexts.size > 100) {
+    const firstKey = sentMessageTexts.keys().next().value;
+    if (firstKey) sentMessageTexts.delete(firstKey);
+  }
+}
+
+function isSentMessage(text: string): boolean {
+  const key = text.trim().toLowerCase();
+  const timestamp = sentMessageTexts.get(key);
+  if (timestamp && Date.now() - timestamp < SENT_MESSAGE_ECHO_WINDOW_MS) {
+    return true;
+  }
+  return false;
+}
+
 // Security config file path
 const GCHAT_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/gchat-security.json");
 
@@ -220,6 +250,9 @@ class GChatEventHandler implements ChannelEventHandler {
   private sendMessage(message: string): void {
     if (!message || !message.trim()) return;
 
+    // Track this message to prevent echo loops
+    trackSentMessage(message);
+
     try {
       const proc = spawn("npx", ["tsx", SEND_SCRIPT, this.spaceName, message], {
         cwd: PROJECT_ROOT,
@@ -259,6 +292,10 @@ export const GChatChannel: ChannelDefinition = {
 
     // Track processed messages to avoid duplicates
     const processedMessages = new Set<string>();
+
+    // Track recent message texts to detect echoes (text -> timestamp)
+    const recentMessageTexts = new Map<string, number>();
+    const ECHO_DETECTION_WINDOW_MS = 60000; // 1 minute window
 
     async function checkForNewMessages() {
       const config = loadSecurityConfig();
@@ -309,6 +346,10 @@ export const GChatChannel: ChannelDefinition = {
 
               // Skip messages from ourselves
               const senderUserId = msg.sender?.name;
+              const senderType = (msg.sender as any)?.type;
+
+              // Log sender details for debugging
+              log(`[GChatChannel] Message sender: userId=${senderUserId}, type=${senderType}, myUserId=${myUserId}`);
 
               // Method 1: Check by user ID if we know it
               if (myUserId && senderUserId === myUserId) {
@@ -316,18 +357,50 @@ export const GChatChannel: ChannelDefinition = {
                 continue;
               }
 
-              // Method 2: Check by sender type - skip if sender type is HUMAN and it's us
-              // In Google Chat API, sender.type can be "HUMAN" or "BOT"
-              // The sender.name for humans is "users/[id]"
-              // We need to check against the authenticated user
+              // Method 2: Skip messages from HUMAN type if they match our user ID pattern
+              // When we send via Chat API with OAuth, sender might be "users/..." matching our ID
+              if (senderType === "HUMAN" && senderUserId && myUserId && senderUserId === myUserId) {
+                log(`[GChatChannel] Skipping own message (by type HUMAN + user ID): ${msg.text?.slice(0, 30)}...`);
+                continue;
+              }
 
-              // Method 3: Check the sender's display name or other identifying info
-              // This is a fallback - not as reliable
               const senderDisplayName = msg.sender?.displayName || "";
 
               // Get the text
               const text = msg.text || "";
               if (!text.trim()) continue;
+
+              // Method 3: Check if this is a message we sent (echo detection from outbound messages)
+              if (isSentMessage(text)) {
+                log(`[GChatChannel] Skipping own sent message (echo): ${text.slice(0, 30)}...`);
+                continue;
+              }
+
+              // Method 4: Echo detection - skip if we recently saw the exact same text
+              // This catches cases where our sent messages come back with different sender info
+              const textKey = text.trim().toLowerCase();
+              const now = Date.now();
+
+              // Clean up old entries
+              for (const [key, timestamp] of recentMessageTexts) {
+                if (now - timestamp > ECHO_DETECTION_WINDOW_MS) {
+                  recentMessageTexts.delete(key);
+                }
+              }
+
+              // Check if this is a likely echo (same text within the window)
+              if (recentMessageTexts.has(textKey)) {
+                log(`[GChatChannel] Skipping likely echo (duplicate text): ${text.slice(0, 30)}...`);
+                continue;
+              }
+
+              // Track this message text
+              recentMessageTexts.set(textKey, now);
+              // Limit map size
+              if (recentMessageTexts.size > 100) {
+                const firstKey = recentMessageTexts.keys().next().value;
+                if (firstKey) recentMessageTexts.delete(firstKey);
+              }
 
               const createTime = new Date(msg.createTime || Date.now());
 

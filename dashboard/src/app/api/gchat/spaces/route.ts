@@ -38,42 +38,40 @@ export async function GET() {
     const spacesResponse = await chat.spaces.list({ pageSize: 100 });
     const spaces = spacesResponse.data.spaces || [];
 
-    // Try to get our own user ID by looking at a DM space membership
+    // Try to get our own user ID by sending a test message and checking the sender
+    // This is the most reliable way since the sender ID on sent messages is what we need to filter
     let myUserId: string | null = null;
 
-    // Find a DM space to check membership
-    const dmSpace = spaces.find(s => s.spaceType === "DIRECT_MESSAGE");
-    if (dmSpace && dmSpace.name) {
+    // Find any space we can send a message to
+    const targetSpace = spaces.find(s => s.spaceType === "SPACE" || s.spaceType === "DIRECT_MESSAGE");
+    if (targetSpace && targetSpace.name) {
       try {
-        const membersResponse = await chat.spaces.members.list({
-          parent: dmSpace.name,
+        // Send a test message and immediately delete it to get our user ID
+        const testMessage = await chat.spaces.messages.create({
+          parent: targetSpace.name,
+          requestBody: {
+            text: "🔧 Auto-detecting user ID (this message will be deleted)",
+          },
         });
 
-        // In a DM, one of the members is us - we can identify by checking
-        // which member has type HUMAN (both will be HUMAN in DM, but we need another way)
-        // Actually, let's use the Gmail API to get our email and match
-        const gmail = google.gmail({ version: "v1", auth });
-        const profile = await gmail.users.getProfile({ userId: "me" });
-        const myEmail = profile.data.emailAddress;
-
-        // Now look through memberships to find ours
-        for (const membership of membersResponse.data.memberships || []) {
-          // The member name format for humans is "users/[id]"
-          // We can try to match by getting member details
-          if (membership.member?.name?.startsWith("users/")) {
-            // For now, store the first user ID we find that could be ours
-            // In DMs there are only 2 members, so we'd need to check which one is us
-            // Let's store this user ID and also return the email for reference
-            if (!myUserId) {
-              myUserId = membership.member.name;
-            }
-          }
+        // The sender of this message is us - this is the ID we need
+        if (testMessage.data.sender?.name) {
+          myUserId = testMessage.data.sender.name;
         }
 
-        // Better approach: look at a space where we sent a message
-        // For now, let's just return what we have
+        // Delete the test message
+        if (testMessage.data.name) {
+          try {
+            await chat.spaces.messages.delete({
+              name: testMessage.data.name,
+            });
+          } catch (deleteErr) {
+            // Deletion might fail if we don't have permission, that's OK
+            console.log("Could not delete test message:", deleteErr);
+          }
+        }
       } catch (err) {
-        console.error("Error getting membership:", err);
+        console.error("Error detecting user ID:", err);
       }
     }
 
