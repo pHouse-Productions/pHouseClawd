@@ -7,9 +7,36 @@ function getProjectRoot(): string {
   return path.resolve(process.cwd(), "..");
 }
 
-export async function POST() {
+type RestartTarget = "watcher" | "dashboard" | "all";
+
+const SCRIPTS: Record<RestartTarget, string> = {
+  watcher: "watcher-restart.sh",
+  dashboard: "dashboard-restart.sh",
+  all: "restart.sh",
+};
+
+const MESSAGES: Record<RestartTarget, string> = {
+  watcher: "Watcher restart triggered.",
+  dashboard: "Dashboard restart triggered. The page will be unavailable briefly.",
+  all: "Full restart triggered. The dashboard will be unavailable briefly.",
+};
+
+export async function POST(request: Request) {
   const projectRoot = getProjectRoot();
-  const restartScript = path.join(projectRoot, "restart.sh");
+
+  // Get target from request body
+  let target: RestartTarget = "watcher";
+  try {
+    const body = await request.json();
+    if (body.target && ["watcher", "dashboard", "all"].includes(body.target)) {
+      target = body.target;
+    }
+  } catch {
+    // Default to watcher if no body
+  }
+
+  const scriptName = SCRIPTS[target];
+  const restartScript = path.join(projectRoot, scriptName);
 
   // Check if script exists first
   if (!existsSync(restartScript)) {
@@ -37,7 +64,8 @@ export async function POST() {
 
     return NextResponse.json({
       success: true,
-      message: "Restart triggered. The dashboard will be unavailable briefly."
+      target,
+      message: MESSAGES[target],
     });
   } catch (error) {
     return NextResponse.json(
