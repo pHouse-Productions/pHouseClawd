@@ -12,7 +12,7 @@ interface Job {
   model?: string;
   cost?: number;
   durationMs?: number;
-  status: "running" | "completed" | "error";
+  status: "running" | "completed" | "error" | "stopped";
   triggerText?: string;
   toolCount: number;
 }
@@ -45,6 +45,7 @@ function StatusBadge({ status }: { status: Job["status"] }) {
     running: "bg-blue-500/20 text-blue-400 border-blue-500/30",
     completed: "bg-green-500/20 text-green-400 border-green-500/30",
     error: "bg-red-500/20 text-red-400 border-red-500/30",
+    stopped: "bg-orange-500/20 text-orange-400 border-orange-500/30",
   };
   return (
     <span className={`px-2 py-0.5 text-xs font-medium rounded border ${colors[status]}`}>
@@ -70,6 +71,36 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [stoppingJobs, setStoppingJobs] = useState<Set<string>>(new Set());
+
+  const stopJob = async (jobId: string, e: React.MouseEvent) => {
+    e.preventDefault(); // Don't navigate to job detail
+    e.stopPropagation();
+
+    if (stoppingJobs.has(jobId)) return;
+
+    setStoppingJobs((prev) => new Set(prev).add(jobId));
+
+    try {
+      const res = await authFetch(`/api/jobs/${jobId}/stop`, { method: "POST" });
+      if (res.ok) {
+        // Refresh job list
+        await fetchJobs();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to stop job");
+      }
+    } catch (err) {
+      console.error("Failed to stop job:", err);
+      alert("Failed to stop job");
+    } finally {
+      setStoppingJobs((prev) => {
+        const next = new Set(prev);
+        next.delete(jobId);
+        return next;
+      });
+    }
+  };
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -101,6 +132,7 @@ export default function JobsPage() {
   const runningJobs = jobs.filter((j) => j.status === "running");
   const completedJobs = jobs.filter((j) => j.status === "completed");
   const errorJobs = jobs.filter((j) => j.status === "error");
+  const stoppedJobs = jobs.filter((j) => j.status === "stopped");
 
   if (loading) {
     return (
@@ -135,7 +167,7 @@ export default function JobsPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-3 text-center">
           <div className="text-xl font-bold text-blue-500">{runningJobs.length}</div>
           <div className="text-xs text-zinc-500">Running</div>
@@ -143,6 +175,10 @@ export default function JobsPage() {
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-3 text-center">
           <div className="text-xl font-bold text-green-500">{completedJobs.length}</div>
           <div className="text-xs text-zinc-500">Completed</div>
+        </div>
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-3 text-center">
+          <div className="text-xl font-bold text-orange-500">{stoppedJobs.length}</div>
+          <div className="text-xs text-zinc-500">Stopped</div>
         </div>
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-3 text-center">
           <div className="text-xl font-bold text-red-500">{errorJobs.length}</div>
@@ -199,9 +235,20 @@ export default function JobsPage() {
                     <span>{formatCost(job.cost)}</span>
                   </div>
                 </div>
-                <svg className="w-5 h-5 text-zinc-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {job.status === "running" && (
+                    <button
+                      onClick={(e) => stopJob(job.id, e)}
+                      disabled={stoppingJobs.has(job.id)}
+                      className="px-3 py-1.5 text-xs font-medium bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded transition-colors disabled:opacity-50"
+                    >
+                      {stoppingJobs.has(job.id) ? "Stopping..." : "Stop"}
+                    </button>
+                  )}
+                  <svg className="w-5 h-5 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
               </div>
             </Link>
           ))}

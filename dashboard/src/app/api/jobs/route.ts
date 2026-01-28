@@ -14,7 +14,8 @@ interface JobFile {
   endTime?: string;
   channel: string;
   trigger: string;
-  status: "running" | "completed" | "error";
+  status: "running" | "completed" | "error" | "stopped";
+  pid?: number;
   model?: string;
   cost?: number;
   durationMs?: number;
@@ -44,7 +45,7 @@ interface Job {
   cost?: number;
   durationMs?: number;
   steps: JobStep[];
-  status: "running" | "completed" | "error";
+  status: "running" | "completed" | "error" | "stopped";
   triggerText?: string;
   toolCount: number;
 }

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { config } from "dotenv";
 import cron from "node-cron";
@@ -220,13 +220,17 @@ interface JobData {
   endTime?: string;
   channel: string;
   trigger: string;
-  status: "running" | "completed" | "error";
+  status: "running" | "completed" | "error" | "stopped";
+  pid?: number;
   model?: string;
   cost?: number;
   durationMs?: number;
   toolCount: number;
   events: any[];
 }
+
+// Track running Claude processes for kill capability
+const runningJobs: Map<string, ChildProcess> = new Map();
 
 function generateJobId(): string {
   const now = new Date();
@@ -239,13 +243,14 @@ function getJobFilePath(jobId: string): string {
   return path.join(JOBS_DIR, `${jobId}.json`);
 }
 
-function createJobFile(jobId: string, channel: string, trigger: string): void {
+function createJobFile(jobId: string, channel: string, trigger: string, pid?: number): void {
   const jobData: JobData = {
     id: jobId,
     startTime: new Date().toISOString(),
     channel,
     trigger,
     status: "running",
+    pid,
     toolCount: 0,
     events: [],
   };
@@ -276,7 +281,7 @@ function appendJobEvent(jobId: string, event: any): void {
   }
 }
 
-function finalizeJob(jobId: string, status: "completed" | "error", cost?: number, durationMs?: number): void {
+function finalizeJob(jobId: string, status: "completed" | "error" | "stopped", cost?: number, durationMs?: number): void {
   const filePath = getJobFilePath(jobId);
   try {
     const jobData: JobData = JSON.parse(fs.readFileSync(filePath, "utf-8"));
@@ -288,7 +293,49 @@ function finalizeJob(jobId: string, status: "completed" | "error", cost?: number
   } catch (err) {
     log(`[Jobs] Error finalizing ${jobId}: ${err}`);
   }
+  // Clean up from running jobs map
+  runningJobs.delete(jobId);
 }
+
+// Kill a running job by ID
+function killJob(jobId: string): boolean {
+  // Try in-memory process first (preferred)
+  const proc = runningJobs.get(jobId);
+  if (proc) {
+    log(`[Jobs] Killing job ${jobId} via in-memory process reference`);
+    proc.kill("SIGTERM");
+    finalizeJob(jobId, "stopped");
+    return true;
+  }
+
+  // Fallback: try to kill by PID from job file
+  const filePath = getJobFilePath(jobId);
+  try {
+    if (fs.existsSync(filePath)) {
+      const jobData: JobData = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      if (jobData.status === "running" && jobData.pid) {
+        log(`[Jobs] Killing job ${jobId} via PID ${jobData.pid} (fallback)`);
+        process.kill(jobData.pid, "SIGTERM");
+        finalizeJob(jobId, "stopped");
+        return true;
+      }
+    }
+  } catch (err) {
+    log(`[Jobs] Error killing job ${jobId}: ${err}`);
+  }
+  return false;
+}
+
+// Get the currently running job ID (if any)
+function getRunningJobId(): string | null {
+  for (const [jobId] of runningJobs) {
+    return jobId;
+  }
+  return null;
+}
+
+// Export for API access
+export { killJob, getRunningJobId };
 
 // Short-term memory logging
 function getTorontoTimestamp(): string {
@@ -615,6 +662,8 @@ async function handleChannelEvent(
       sendReply(`Current mode: ${currentMode}\n\nUse /mode session or /mode transcript to switch.`);
       return;
     }
+
+    // Note: /stop is handled with priority in processEvent() before queueing
   }
 
   // Email security check
@@ -682,7 +731,6 @@ async function handleChannelEvent(
 
   // Create a job file for this invocation
   const jobId = generateJobId();
-  createJobFile(jobId, channel.name, prompt.slice(0, 500));
 
   return new Promise((resolve, reject) => {
     log(`[Watcher] Spawning Claude with session ${sessionId} (mode: ${channelMode}, ${useNewSession ? "new" : "resuming"}) [job: ${jobId}]`);
@@ -707,6 +755,10 @@ async function handleChannelEvent(
         stdio: ["ignore", "pipe", "pipe"],
       }
     );
+
+    // Track PID in job file and in-memory map
+    createJobFile(jobId, channel.name, prompt.slice(0, 500), proc.pid);
+    runningJobs.set(jobId, proc);
 
     let stdout = "";
     let stderr = "";
@@ -759,12 +811,13 @@ async function handleChannelEvent(
       process.stderr.write(chunk);
     });
 
-    proc.on("close", (code) => {
-      log(`[Watcher] Claude exited with code ${code} [job: ${jobId}]`);
+    proc.on("close", (code, signal) => {
+      log(`[Watcher] Claude exited with code ${code}, signal ${signal} [job: ${jobId}]`);
       handler.onComplete(code || 0);
 
-      // Finalize the job file
-      const status = code === 0 ? "completed" : "error";
+      // Determine status: stopped if killed by signal, otherwise completed/error
+      const wasKilled = signal === "SIGTERM" || signal === "SIGKILL";
+      const status = wasKilled ? "stopped" : (code === 0 ? "completed" : "error");
       finalizeJob(jobId, status, lastCost, lastDurationMs);
 
       // Log outgoing response to short-term memory
@@ -805,8 +858,60 @@ async function handleChannelEvent(
 
 // Process event with concurrency control
 async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Promise<void> {
-  const { sessionKey } = event;
+  const { sessionKey, payload } = event;
   const lockKey = channel.concurrency === "global" ? channel.name : sessionKey;
+
+  // PRIORITY: Handle /stop command immediately, before queueing
+  // This ensures stop commands can interrupt running jobs
+  if ((channel.name === "telegram" || channel.name === "gchat") && payload.type === "message") {
+    const text = payload.text?.trim().toLowerCase();
+    if (text === "/stop" || text?.startsWith("/stop ")) {
+      log(`[Watcher] Processing /stop command with priority (bypassing queue)`);
+
+      // Helper to send a message back
+      const sendReply = (message: string) => {
+        if (channel.name === "telegram") {
+          const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
+          spawn("npx", ["tsx", sendScript, String(payload.chat_id), message], {
+            cwd: PROJECT_ROOT,
+            stdio: ["ignore", "ignore", "ignore"],
+            detached: true,
+          }).unref();
+        } else if (channel.name === "gchat") {
+          const sendScript = path.join(PROJECT_ROOT, "listeners/gchat/send-message.ts");
+          spawn("npx", ["tsx", sendScript, payload.space_name, message], {
+            cwd: PROJECT_ROOT,
+            stdio: ["ignore", "ignore", "ignore"],
+            detached: true,
+          }).unref();
+        }
+      };
+
+      // Check if a specific job ID was provided
+      const parts = payload.text?.trim().split(/\s+/);
+      const specificJobId = parts && parts.length > 1 ? parts[1] : null;
+
+      if (specificJobId) {
+        const killed = killJob(specificJobId);
+        if (killed) {
+          log(`[Watcher] Stopped job ${specificJobId} via /stop command`);
+          sendReply(`Done. Killed job ${specificJobId}.`);
+        } else {
+          sendReply(`Couldn't find running job ${specificJobId}. It might have already finished.`);
+        }
+      } else {
+        const runningJobId = getRunningJobId();
+        if (runningJobId) {
+          killJob(runningJobId);
+          log(`[Watcher] Stopped running job ${runningJobId} via /stop command`);
+          sendReply(`Done. Killed the running job.`);
+        } else {
+          sendReply(`Nothing running right now, boss.`);
+        }
+      }
+      return; // Don't queue or process further
+    }
+  }
 
   // Check concurrency
   if (channel.concurrency === "session" || channel.concurrency === "global") {
@@ -956,7 +1061,6 @@ async function handleCronJob(job: CronJob): Promise<void> {
 
   // Create a job file for this cron execution
   const jobFileId = generateJobId();
-  createJobFile(jobFileId, "cron", `[${job.description}] ${prompt.slice(0, 400)}`);
 
   return new Promise((resolve, reject) => {
     log(`[Cron] Running job ${job.id}: ${job.description} [job: ${jobFileId}]`);
@@ -981,6 +1085,10 @@ async function handleCronJob(job: CronJob): Promise<void> {
         stdio: ["ignore", "pipe", "pipe"],
       }
     );
+
+    // Track PID in job file and in-memory map
+    createJobFile(jobFileId, "cron", `[${job.description}] ${prompt.slice(0, 400)}`, proc.pid);
+    runningJobs.set(jobFileId, proc);
 
     let lineBuffer = "";
     let lastCost: number | undefined;
@@ -1009,14 +1117,15 @@ async function handleCronJob(job: CronJob): Promise<void> {
       }
     });
 
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
       handler.onComplete(code || 0);
       if (isNewSession) {
         markSessionKnown(sessionId);
       }
 
-      // Finalize the job file
-      const status = code === 0 ? "completed" : "error";
+      // Determine status: stopped if killed by signal, otherwise completed/error
+      const wasKilled = signal === "SIGTERM" || signal === "SIGKILL";
+      const status = wasKilled ? "stopped" : (code === 0 ? "completed" : "error");
       finalizeJob(jobFileId, status, lastCost, lastDurationMs);
 
       // Log cron output to short-term memory
