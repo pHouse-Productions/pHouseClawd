@@ -211,9 +211,13 @@ fi
 print_step "Configuring Google credential paths..."
 MCP_ENV="$PARENT_DIR/pHouseMcp/.env"
 
-# Remove any existing GOOGLE_CREDENTIALS_PATH and GOOGLE_TOKEN_PATH lines
+# Remove any existing Google credential lines (including comments)
 sed -i '/^GOOGLE_CREDENTIALS_PATH=/d' "$MCP_ENV"
 sed -i '/^GOOGLE_TOKEN_PATH=/d' "$MCP_ENV"
+sed -i '/^# Google OAuth Credentials (auto-configured/d' "$MCP_ENV"
+
+# Clean up multiple blank lines
+sed -i '/^$/N;/^\n$/d' "$MCP_ENV"
 
 # Add the correct paths
 echo "" >> "$MCP_ENV"
