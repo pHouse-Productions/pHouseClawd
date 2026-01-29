@@ -58,12 +58,27 @@ function isTrustedSender(fromAddress: string): boolean {
   );
 }
 
-async function forwardUntrustedEmail(email: { from: string; date: string; subject: string; body: string }): Promise<void> {
+async function forwardUntrustedEmail(email: { from: string; to: string; cc: string; date: string; subject: string; body: string }): Promise<void> {
   const config = loadEmailSecurityConfig();
   if (config.forwardUntrustedTo.length === 0) return;
 
+  // Extract email address from "Name <email@address.com>" format if present
+  const emailMatch = email.from.match(/<(.+)>/);
+  const emailAddress = emailMatch ? emailMatch[1] : email.from;
+  const displayName = emailMatch ? email.from.replace(/<.+>/, "").trim() : "";
+
   const forwardSubject = `Fwd: ${email.subject}`;
-  const forwardBody = `---------- Forwarded message ----------\nFrom: ${email.from}\nDate: ${email.date}\nSubject: ${email.subject}\n\n${email.body}`;
+
+  // Build header lines with explicit email addresses
+  const headerLines: string[] = [];
+  headerLines.push(displayName ? `From: ${displayName}` : `From: ${emailAddress}`);
+  if (displayName) headerLines.push(`Email: ${emailAddress}`);
+  if (email.to) headerLines.push(`To: ${email.to}`);
+  if (email.cc) headerLines.push(`CC: ${email.cc}`);
+  headerLines.push(`Date: ${email.date}`);
+  headerLines.push(`Subject: ${email.subject}`);
+
+  const forwardBody = `---------- Forwarded message ----------\n${headerLines.join("\n")}\n\n${email.body}`;
 
   // Forward to all addresses in the list
   for (const recipient of config.forwardUntrustedTo) {
@@ -342,6 +357,8 @@ export const EmailChannel: ChannelDefinition = {
             log(`[EmailChannel] Subject: ${email.subject}`);
 
             // Security check - filter untrusted senders
+            // NOTE: Users can ALSO set up Gmail filters for richer forwarding (preserves attachments)
+            // This code-based forwarding is simpler to configure via dashboard but less rich
             if (!isTrustedSender(email.from)) {
               log(`[EmailChannel] Untrusted sender: ${email.from} - blocking auto-reply`);
               await forwardUntrustedEmail(email);
