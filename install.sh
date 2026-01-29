@@ -128,6 +128,9 @@ print_step "Installing pHouseMcp dependencies..."
 cd "$PARENT_DIR/pHouseMcp"
 npm install
 
+print_step "Building pHouseMcp servers..."
+npm run build
+
 print_step "Installing pHouseClawd dependencies..."
 cd "$SCRIPT_DIR"
 
@@ -252,8 +255,8 @@ for server_dir in "$MCP_SERVERS_DIR"/*/; do
         mcp_entry=$(cat <<MCPEOF
 {
   "type": "stdio",
-  "command": "npx",
-  "args": ["--prefix", "$server_path", "tsx", "$server_path/src/mcp.ts"],
+  "command": "node",
+  "args": ["$server_path/dist/mcp.js"],
   "env": {}
 }
 MCPEOF

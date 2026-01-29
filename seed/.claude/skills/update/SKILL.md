@@ -26,7 +26,7 @@ The main assistant framework with the watcher, dashboard, and configuration.
 ### Step 1: Update pHouseMcp
 
 ```bash
-cd /home/ubuntu/pHouseMcp && git fetch origin && git pull origin main
+cd /home/ubuntu/pHouseMcp && git fetch origin && git pull origin master
 ```
 
 Check what changed:
@@ -34,7 +34,10 @@ Check what changed:
 cd /home/ubuntu/pHouseMcp && git log --oneline -5
 ```
 
-If there are new changes, run `npm install` to update dependencies.
+If there are new changes, run `npm install` to update dependencies, then rebuild the TypeScript:
+```bash
+cd /home/ubuntu/pHouseMcp && npm install && npm run build
+```
 
 ### Step 2: Update pHouseClawd
 
