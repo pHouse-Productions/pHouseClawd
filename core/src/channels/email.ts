@@ -18,6 +18,14 @@ const LOG_FILE = path.join(LOGS_DIR, "watcher.log");
 
 const POLL_INTERVAL = 60000; // Check every 60 seconds
 
+// Email attachments directory
+const FILES_DIR = path.join(PROJECT_ROOT, "memory/email/files");
+
+// Ensure files directory exists
+if (!fs.existsSync(FILES_DIR)) {
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+}
+
 // Email security config
 const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-security.json");
 
@@ -168,6 +176,69 @@ function extractBody(payload: any): string {
   }
 
   return "";
+}
+
+interface AttachmentInfo {
+  filename: string;
+  mimeType: string;
+  attachmentId: string;
+  size: number;
+}
+
+function extractAttachments(payload: any): AttachmentInfo[] {
+  const attachments: AttachmentInfo[] = [];
+
+  function scanParts(parts: any[]) {
+    for (const part of parts) {
+      // Check if this part is an attachment (has a filename and attachmentId)
+      if (part.filename && part.body?.attachmentId) {
+        attachments.push({
+          filename: part.filename,
+          mimeType: part.mimeType || "application/octet-stream",
+          attachmentId: part.body.attachmentId,
+          size: part.body.size || 0,
+        });
+      }
+      // Recursively scan nested parts
+      if (part.parts) {
+        scanParts(part.parts);
+      }
+    }
+  }
+
+  if (payload.parts) {
+    scanParts(payload.parts);
+  }
+
+  return attachments;
+}
+
+async function downloadEmailAttachment(
+  gmail: any,
+  messageId: string,
+  attachment: AttachmentInfo
+): Promise<string> {
+  const timestamp = Date.now();
+  const safeFileName = attachment.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const filename = `${timestamp}_${safeFileName}`;
+  const filePath = path.join(FILES_DIR, filename);
+
+  const response = await gmail.users.messages.attachments.get({
+    userId: "me",
+    messageId,
+    id: attachment.attachmentId,
+  });
+
+  const data = response.data.data;
+  if (data) {
+    // Gmail returns base64url encoded data
+    const buffer = Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    fs.writeFileSync(filePath, buffer);
+    log(`[EmailChannel] Downloaded attachment: ${attachment.filename} -> ${filePath}`);
+    return filePath;
+  }
+
+  throw new Error("No attachment data received");
 }
 
 function getLastHistoryId(): string | null {
@@ -341,6 +412,23 @@ export const EmailChannel: ChannelDefinition = {
               continue;
             }
 
+            // Extract and download attachments
+            const attachmentInfos = extractAttachments(detail.data.payload);
+            const downloadedFiles: { path: string; name: string; type: string }[] = [];
+
+            for (const attInfo of attachmentInfos) {
+              try {
+                const filePath = await downloadEmailAttachment(gmail, messageId, attInfo);
+                downloadedFiles.push({
+                  path: filePath,
+                  name: attInfo.filename,
+                  type: attInfo.mimeType,
+                });
+              } catch (err: any) {
+                log(`[EmailChannel] Failed to download attachment ${attInfo.filename}: ${err.message}`);
+              }
+            }
+
             const email = {
               id: messageId,
               thread_id: detail.data.threadId,
@@ -351,10 +439,14 @@ export const EmailChannel: ChannelDefinition = {
               subject: getHeader(headers, "Subject"),
               date: getHeader(headers, "Date"),
               body: extractBody(detail.data.payload),
+              downloaded_files: downloadedFiles,
             };
 
             log(`[EmailChannel] New email from: ${email.from}`);
             log(`[EmailChannel] Subject: ${email.subject}`);
+            if (downloadedFiles.length > 0) {
+              log(`[EmailChannel] Downloaded ${downloadedFiles.length} attachment(s)`);
+            }
 
             // Security check - filter untrusted senders
             // NOTE: Users can ALSO set up Gmail filters for richer forwarding (preserves attachments)
@@ -374,11 +466,26 @@ export const EmailChannel: ChannelDefinition = {
             if (email.cc) recipients.push(`CC: ${email.cc}`);
             const recipientInfo = recipients.length > 0 ? `${recipients.join('\n')}\n` : '';
 
-            const prompt = `[Email from ${email.from}]
+            let prompt = `[Email from ${email.from}]
 ${recipientInfo}Subject: ${email.subject}
 Date: ${email.date}
 
 ${email.body}`;
+
+            // Add attachment file paths like GChat/Telegram do
+            if (downloadedFiles.length > 0) {
+              for (const file of downloadedFiles) {
+                const isImage = file.type.startsWith("image/");
+                const isPdf = file.type === "application/pdf";
+                if (isImage) {
+                  prompt += `\n\n[Image Attachment: ${file.name}]\nIMPORTANT: Use the Read tool to view the image at: ${file.path}`;
+                } else if (isPdf) {
+                  prompt += `\n\n[PDF Attachment: ${file.name}]\nIMPORTANT: The PDF has been saved to: ${file.path}`;
+                } else {
+                  prompt += `\n\n[Attachment: ${file.name} (${file.type})]\nIMPORTANT: The file has been saved to: ${file.path}`;
+                }
+              }
+            }
 
             onEvent({
               sessionKey,
