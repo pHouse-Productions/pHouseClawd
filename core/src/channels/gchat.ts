@@ -54,6 +54,7 @@ const GCHAT_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/gchat-securit
 interface GChatSecurityConfig {
   allowedSpaces: string[];
   myUserId?: string; // Our user ID to filter out self-messages (format: "users/123456789")
+  userNames?: Record<string, string>; // Mapping of user IDs to display names
 }
 
 function loadSecurityConfig(): GChatSecurityConfig {
@@ -63,12 +64,13 @@ function loadSecurityConfig(): GChatSecurityConfig {
       return {
         allowedSpaces: config.allowedSpaces || [],
         myUserId: config.myUserId || undefined,
+        userNames: config.userNames || {},
       };
     }
   } catch (err) {
     log(`[GChatChannel] Failed to load security config: ${err}`);
   }
-  return { allowedSpaces: [] };
+  return { allowedSpaces: [], userNames: {} };
 }
 
 function log(message: string) {
@@ -407,11 +409,18 @@ export const GChatChannel: ChannelDefinition = {
                 continue;
               }
 
-              const senderDisplayName = msg.sender?.displayName || "";
-
-              // Get the text
+              // Get the text first (before async lookup)
               const text = msg.text || "";
               if (!text.trim()) continue;
+
+              // Get display name - try from message first, then config mapping
+              let senderDisplayName = msg.sender?.displayName || "";
+              if (!senderDisplayName && senderUserId && config.userNames) {
+                senderDisplayName = config.userNames[senderUserId] || "";
+                if (senderDisplayName) {
+                  log(`[GChatChannel] Resolved name from config: ${senderUserId} -> ${senderDisplayName}`);
+                }
+              }
 
               // Method 3: Check if this is a message we sent (echo detection from outbound messages)
               if (isSentMessage(text)) {
