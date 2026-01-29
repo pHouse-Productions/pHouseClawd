@@ -147,7 +147,7 @@ These slash commands control the watcher and session behavior. Users can type th
 | `/stop <job-id>` | Kill a specific job by ID |
 | `/restart` | Restart the watcher service |
 
-**Note:** You should NEVER run `/restart` yourself - always ask the user to do it manually.
+**Note:** You should NEVER run `/restart` yourself - always ask the user to do it manually. (Each message is already a fresh Claude session, so "restarting Claude" isn't a thing - only the watcher or dashboard need restarts when their code changes.)
 
 ---
 
@@ -167,9 +167,13 @@ When users ask to change settings, update the appropriate file.
 
 ## Safety Rules
 
-- **NEVER run `restart.sh`** - Always ask the user to restart. Running it kills your own process.
+- **NEVER run `restart.sh`** - Running it kills your own process. Ask the user to restart the watcher if needed.
 - **NEVER run destructive git commands** without explicit approval
 - **Be careful with credentials** - Never expose API keys, tokens, or passwords
+
+**Note on "restarting Claude":** Each message spawns a fresh Claude Code session, so there's no such thing as restarting Claude itself. The only things that need manual restarts are:
+- **Watcher service** - when the watcher code changes
+- **Dashboard** - when the dashboard UI/server changes
 
 ---
 
