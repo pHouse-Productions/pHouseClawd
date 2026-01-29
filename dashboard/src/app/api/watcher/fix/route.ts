@@ -140,26 +140,21 @@ export async function POST() {
     const jobId = generateJobId();
 
     // Spawn Claude Code in print mode with JSON output
-    // IMPORTANT: We pipe the prompt via stdin instead of passing as arg because
-    // claude hangs when passed a prompt arg in non-TTY contexts (like Node spawn)
+    // Match the watcher's spawn pattern exactly:
+    // - Pass prompt as the final argument after -p
+    // - Ignore stdin, pipe stdout/stderr
     const proc = spawn("claude", [
       "-p", // print mode (non-interactive)
+      "--verbose",
+      "--output-format", "stream-json", // structured output for event parsing
       "--dangerously-skip-permissions", // allow all operations
       "--model", "sonnet", // use sonnet for faster response
-      "--output-format", "stream-json", // structured output for event parsing
+      FIX_PROMPT, // prompt as final argument (same as watcher)
     ], {
       cwd: projectRoot,
-      env: {
-        ...process.env,
-        HOME: process.env.HOME || "/home/ubuntu",
-        PATH: process.env.PATH,
-      },
-      stdio: ["pipe", "pipe", "pipe"], // Explicitly set up pipes for stdin/stdout/stderr
+      env: { ...process.env, FORCE_COLOR: "0" },
+      stdio: ["ignore", "pipe", "pipe"], // Match watcher: ignore stdin, pipe stdout/stderr
     });
-
-    // Write prompt to stdin and close it to signal we're done
-    proc.stdin?.write(FIX_PROMPT);
-    proc.stdin?.end();
 
     // Create job file after we have the PID
     createJobFile(jobId, "dashboard-fix", "Emergency watcher fix triggered via dashboard", proc.pid, FIX_PROMPT);
