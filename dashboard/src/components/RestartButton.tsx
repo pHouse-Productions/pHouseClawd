@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { authFetch } from "@/lib/auth";
+import { useRouter } from "next/navigation";
 
 type RestartTarget = "watcher" | "dashboard" | "all";
 type ActionType = RestartTarget | "fix";
@@ -16,12 +17,18 @@ interface Status {
   dashboard: ProcessStatus;
 }
 
+interface FixResult {
+  output: string;
+  jobId?: string;
+}
+
 export default function RestartButton() {
   const [isRestarting, setIsRestarting] = useState(false);
   const [isFixing, setIsFixing] = useState(false);
-  const [fixOutput, setFixOutput] = useState<string | null>(null);
+  const [fixResult, setFixResult] = useState<FixResult | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
+  const router = useRouter();
 
   // Fetch status on mount and periodically
   useEffect(() => {
@@ -77,7 +84,7 @@ export default function RestartButton() {
   const handleFix = async () => {
     setIsFixing(true);
     setShowMenu(false);
-    setFixOutput(null);
+    setFixResult(null);
 
     try {
       const res = await authFetch("/api/watcher/fix", {
@@ -86,16 +93,27 @@ export default function RestartButton() {
       const data = await res.json();
 
       if (data.success) {
-        setFixOutput(data.output || "Fix completed successfully!");
+        setFixResult({
+          output: data.output || "Fix completed successfully!",
+          jobId: data.jobId,
+        });
       } else {
-        setFixOutput(`Fix failed: ${data.error || data.message || "Unknown error"}\n\nOutput:\n${data.output || "No output"}`);
+        setFixResult({
+          output: `Fix failed: ${data.error || data.message || "Unknown error"}\n\nOutput:\n${data.output || "No output"}`,
+          jobId: data.jobId,
+        });
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
-      setFixOutput(`Fix error: ${errorMsg}`);
+      setFixResult({ output: `Fix error: ${errorMsg}` });
     } finally {
       setIsFixing(false);
     }
+  };
+
+  const handleViewJob = (jobId: string) => {
+    setFixResult(null);
+    router.push(`/jobs?job=${jobId}`);
   };
 
   const StatusDot = ({ running }: { running: boolean }) => (
@@ -197,7 +215,7 @@ export default function RestartButton() {
       )}
 
       {/* Fix output modal */}
-      {fixOutput && (
+      {fixResult && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
@@ -209,7 +227,7 @@ export default function RestartButton() {
                 Emergency Fix Results
               </h3>
               <button
-                onClick={() => setFixOutput(null)}
+                onClick={() => setFixResult(null)}
                 className="text-zinc-400 hover:text-white transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -219,12 +237,24 @@ export default function RestartButton() {
             </div>
             <div className="p-4 overflow-y-auto flex-1">
               <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono bg-zinc-800 p-4 rounded-lg overflow-x-auto">
-                {fixOutput}
+                {fixResult.output}
               </pre>
             </div>
             <div className="px-4 py-3 border-t border-zinc-700 flex justify-end gap-2">
+              {fixResult.jobId && (
+                <button
+                  onClick={() => handleViewJob(fixResult.jobId!)}
+                  className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  View Full Job
+                </button>
+              )}
               <button
-                onClick={() => setFixOutput(null)}
+                onClick={() => setFixResult(null)}
                 className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg transition-colors"
               >
                 Close

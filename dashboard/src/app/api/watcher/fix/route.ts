@@ -1,10 +1,94 @@
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import { promises as fs } from "fs";
+import * as syncFs from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
 
 function getProjectRoot(): string {
   return path.resolve(process.cwd(), "..");
+}
+
+const JOBS_DIR = path.join(getProjectRoot(), "logs", "jobs");
+
+interface JobData {
+  id: string;
+  startTime: string;
+  endTime?: string;
+  channel: string;
+  trigger: string;
+  fullPrompt?: string;
+  status: "running" | "completed" | "error" | "stopped";
+  pid?: number;
+  model?: string;
+  cost?: number;
+  durationMs?: number;
+  toolCount: number;
+  events: any[];
+}
+
+function generateJobId(): string {
+  const now = new Date();
+  const timestamp = now.toISOString().replace(/[:.]/g, "-");
+  const uuid = randomUUID().slice(0, 8);
+  return `${timestamp}-${uuid}`;
+}
+
+function getJobFilePath(jobId: string): string {
+  return path.join(JOBS_DIR, `${jobId}.json`);
+}
+
+function createJobFile(jobId: string, channel: string, trigger: string, pid?: number, fullPrompt?: string): void {
+  const jobData: JobData = {
+    id: jobId,
+    startTime: new Date().toISOString(),
+    channel,
+    trigger,
+    fullPrompt,
+    status: "running",
+    pid,
+    toolCount: 0,
+    events: [],
+  };
+  syncFs.writeFileSync(getJobFilePath(jobId), JSON.stringify(jobData, null, 2));
+}
+
+function appendJobEvent(jobId: string, event: any): void {
+  const filePath = getJobFilePath(jobId);
+  try {
+    const jobData: JobData = JSON.parse(syncFs.readFileSync(filePath, "utf-8"));
+    const eventWithTs = { ts: new Date().toISOString(), ...event };
+    jobData.events.push(eventWithTs);
+
+    // Count tool uses
+    if (event.type === "assistant" && event.message?.content) {
+      const toolUses = event.message.content.filter((c: any) => c.type === "tool_use");
+      jobData.toolCount += toolUses.length;
+    }
+
+    // Capture model from init
+    if (event.type === "system" && event.subtype === "init" && event.model) {
+      jobData.model = event.model;
+    }
+
+    syncFs.writeFileSync(filePath, JSON.stringify(jobData, null, 2));
+  } catch (err) {
+    console.error(`[Fix] Error appending event to ${jobId}: ${err}`);
+  }
+}
+
+function finalizeJob(jobId: string, status: "completed" | "error" | "stopped", cost?: number, durationMs?: number): void {
+  const filePath = getJobFilePath(jobId);
+  try {
+    const jobData: JobData = JSON.parse(syncFs.readFileSync(filePath, "utf-8"));
+    jobData.status = status;
+    jobData.endTime = new Date().toISOString();
+    if (cost !== undefined) jobData.cost = cost;
+    if (durationMs !== undefined) jobData.durationMs = durationMs;
+    syncFs.writeFileSync(filePath, JSON.stringify(jobData, null, 2));
+  } catch (err) {
+    console.error(`[Fix] Error finalizing ${jobId}: ${err}`);
+  }
 }
 
 const FIX_PROMPT = `You are Vito, Mike's personal AI assistant. The watcher service is having trouble starting. Your job is to diagnose and fix the issue.
@@ -46,89 +130,109 @@ Be concise but thorough. This output will be shown to the user in the dashboard.
 
 export async function POST() {
   const projectRoot = getProjectRoot();
-  const logsDir = path.join(projectRoot, "logs");
-  const fixLogPath = path.join(logsDir, "watcher-fix.log");
+  const startTime = Date.now();
 
   try {
-    // Ensure logs directory exists
-    await fs.mkdir(logsDir, { recursive: true });
+    // Ensure jobs directory exists
+    await fs.mkdir(JOBS_DIR, { recursive: true });
 
-    // Create a timestamp for this fix attempt
-    const timestamp = new Date().toISOString();
+    // Generate job ID and create job file (same format as watcher)
+    const jobId = generateJobId();
 
-    // Write initial log entry
-    await fs.writeFile(fixLogPath, `[${timestamp}] Starting watcher fix attempt...\n`);
-
-    // Spawn Claude Code in print mode to diagnose and fix
-    const child = spawn("claude", [
+    // Spawn Claude Code in print mode with JSON output
+    const proc = spawn("claude", [
       "-p", // print mode (non-interactive)
       "--dangerously-skip-permissions", // allow all operations
       "--model", "sonnet", // use sonnet for faster response
+      "--output-format", "stream-json", // structured output for event parsing
       FIX_PROMPT
     ], {
       cwd: projectRoot,
       env: {
         ...process.env,
-        // Ensure Claude has the right environment
         HOME: process.env.HOME || "/home/ubuntu",
         PATH: process.env.PATH,
       },
     });
 
-    let output = "";
-    let errorOutput = "";
+    // Create job file after we have the PID
+    createJobFile(jobId, "dashboard-fix", "Emergency watcher fix triggered via dashboard", proc.pid, FIX_PROMPT);
 
-    child.stdout?.on("data", (data) => {
-      output += data.toString();
+    let finalOutput = "";
+    let lineBuffer = "";
+
+    proc.stdout?.on("data", (data) => {
+      lineBuffer += data.toString();
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          appendJobEvent(jobId, event);
+
+          // Extract text output for response
+          if (event.type === "assistant" && event.message?.content) {
+            for (const block of event.message.content) {
+              if (block.type === "text") {
+                finalOutput += block.text;
+              }
+            }
+          }
+        } catch {
+          // Not JSON, just append as text
+          finalOutput += line + "\n";
+        }
+      }
     });
 
-    child.stderr?.on("data", (data) => {
-      errorOutput += data.toString();
+    proc.stderr?.on("data", (data) => {
+      // Log stderr but don't fail
+      console.error(`[Fix] stderr: ${data.toString()}`);
     });
 
-    // Wait for the process to complete (with timeout)
+    // Wait for completion with timeout
     const result = await new Promise<{ success: boolean; output: string; error?: string }>((resolve) => {
       const timeout = setTimeout(() => {
-        child.kill();
+        proc.kill();
+        finalizeJob(jobId, "stopped", undefined, Date.now() - startTime);
         resolve({
           success: false,
-          output: output,
+          output: finalOutput,
           error: "Fix attempt timed out after 5 minutes"
         });
-      }, 5 * 60 * 1000); // 5 minute timeout
+      }, 5 * 60 * 1000);
 
-      child.on("close", (code) => {
+      proc.on("close", (code) => {
         clearTimeout(timeout);
+        const durationMs = Date.now() - startTime;
+        const status = code === 0 ? "completed" : "error";
+        finalizeJob(jobId, status, undefined, durationMs);
         resolve({
           success: code === 0,
-          output: output,
-          error: code !== 0 ? errorOutput || `Process exited with code ${code}` : undefined
+          output: finalOutput,
+          error: code !== 0 ? `Process exited with code ${code}` : undefined
         });
       });
 
-      child.on("error", (err) => {
+      proc.on("error", (err) => {
         clearTimeout(timeout);
+        finalizeJob(jobId, "error", undefined, Date.now() - startTime);
         resolve({
           success: false,
-          output: output,
+          output: finalOutput,
           error: `Failed to spawn Claude: ${err.message}`
         });
       });
     });
-
-    // Write the result to the log file
-    const endTimestamp = new Date().toISOString();
-    await fs.appendFile(fixLogPath, `[${endTimestamp}] Fix attempt completed.\n\nOutput:\n${result.output}\n`);
-    if (result.error) {
-      await fs.appendFile(fixLogPath, `\nError:\n${result.error}\n`);
-    }
 
     return NextResponse.json({
       success: result.success,
       message: result.success ? "Fix attempt completed" : "Fix attempt failed",
       output: result.output,
       error: result.error,
-      logFile: fixLogPath
+      jobId, // Include job ID so frontend can link to it
     });
 
   } catch (error) {
@@ -140,16 +244,40 @@ export async function POST() {
   }
 }
 
-// Also allow GET to check the status/log of the last fix attempt
+// GET endpoint to check the status of the last fix attempt
 export async function GET() {
-  const projectRoot = getProjectRoot();
-  const fixLogPath = path.join(projectRoot, "logs", "watcher-fix.log");
-
   try {
-    const content = await fs.readFile(fixLogPath, "utf-8");
+    const files = await fs.readdir(JOBS_DIR);
+    const fixJobs = files
+      .filter(f => f.endsWith(".json"))
+      .map(f => ({ name: f, path: path.join(JOBS_DIR, f) }));
+
+    // Find most recent fix job
+    let latestFixJob: JobData | null = null;
+    for (const { path: filePath } of fixJobs) {
+      try {
+        const content = await fs.readFile(filePath, "utf-8");
+        const job: JobData = JSON.parse(content);
+        if (job.channel === "dashboard-fix") {
+          if (!latestFixJob || new Date(job.startTime) > new Date(latestFixJob.startTime)) {
+            latestFixJob = job;
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    if (!latestFixJob) {
+      return NextResponse.json({
+        exists: false,
+        content: null
+      });
+    }
+
     return NextResponse.json({
       exists: true,
-      content
+      job: latestFixJob
     });
   } catch {
     return NextResponse.json({
