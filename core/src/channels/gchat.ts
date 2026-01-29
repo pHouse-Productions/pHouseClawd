@@ -15,6 +15,12 @@ const STATE_PATH = path.join(PROJECT_ROOT, "listeners/gchat/last_message_time.tx
 const LOGS_DIR = path.join(PROJECT_ROOT, "logs");
 const LOG_FILE = path.join(LOGS_DIR, "watcher.log");
 const SEND_SCRIPT = path.join(PROJECT_ROOT, "listeners/gchat/send-message.ts");
+const FILES_DIR = path.join(PROJECT_ROOT, "memory/gchat/files");
+
+// Ensure files directory exists
+if (!fs.existsSync(FILES_DIR)) {
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+}
 
 const POLL_INTERVAL = 10000; // Check every 10 seconds
 
@@ -77,6 +83,32 @@ function log(message: string) {
   const timestamp = new Date().toISOString();
   const line = `[${timestamp}] ${message}\n`;
   fs.appendFileSync(LOG_FILE, line);
+}
+
+// Download attachment from Google Chat using media.download
+async function downloadGChatAttachment(
+  auth: any,
+  resourceName: string,
+  destPath: string
+): Promise<void> {
+  const tokens = JSON.parse(fs.readFileSync(TOKEN_PATH, "utf-8"));
+  const accessToken = tokens.access_token;
+
+  // Use fetch with alt=media like the curl that worked
+  const url = `https://chat.googleapis.com/v1/media/${resourceName}?alt=media`;
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(destPath, buffer);
 }
 
 function getOAuth2Client() {
@@ -462,8 +494,47 @@ export const GChatChannel: ChannelDefinition = {
                 latestTime = createTime;
               }
 
+              // Extract and download attachments if present
+              const rawAttachments = msg.attachment || [];
+              const downloadedFiles: { path: string; name: string; type: string }[] = [];
+
+              for (const att of rawAttachments) {
+                const resourceName = att.attachmentDataRef?.resourceName;
+                if (resourceName) {
+                  const contentName = att.contentName || "file";
+                  const contentType = att.contentType || "application/octet-stream";
+                  const timestamp = Date.now();
+                  const safeFileName = contentName.replace(/[^a-zA-Z0-9._-]/g, "_");
+                  const filename = `${timestamp}_${safeFileName}`;
+                  const filePath = path.join(FILES_DIR, filename);
+
+                  try {
+                    await downloadGChatAttachment(auth, resourceName, filePath);
+                    downloadedFiles.push({ path: filePath, name: contentName, type: contentType });
+                    log(`[GChatChannel] Downloaded attachment: ${contentName} -> ${filePath}`);
+                  } catch (err: any) {
+                    log(`[GChatChannel] Failed to download attachment ${contentName}: ${err.message}`);
+                  }
+                }
+              }
+
               const sessionKey = `gchat-${spaceName.replace(/\//g, "-")}`;
-              const prompt = `[Google Chat from ${senderDisplayName || "Someone"} | space: ${spaceName} | msg: ${msgName}]: ${text}`;
+
+              // Build prompt with file paths like Telegram does
+              let prompt = `[Google Chat from ${senderDisplayName || "Someone"} | space: ${spaceName} | msg: ${msgName}]: ${text}`;
+              if (downloadedFiles.length > 0) {
+                for (const file of downloadedFiles) {
+                  const isImage = file.type.startsWith("image/");
+                  const isPdf = file.type === "application/pdf";
+                  if (isImage) {
+                    prompt += `\n\n[Image: ${file.name}]\nIMPORTANT: Use the Read tool to view the image at: ${file.path}`;
+                  } else if (isPdf) {
+                    prompt += `\n\n[PDF: ${file.name}]\nIMPORTANT: The PDF has been saved to: ${file.path}`;
+                  } else {
+                    prompt += `\n\n[File: ${file.name} (${file.type})]\nIMPORTANT: The file has been saved to: ${file.path}`;
+                  }
+                }
+              }
 
               onEvent({
                 sessionKey,
@@ -475,6 +546,7 @@ export const GChatChannel: ChannelDefinition = {
                   sender_user_id: senderUserId,
                   text,
                   message_name: msgName,
+                  downloaded_files: downloadedFiles,
                   verbosity: "streaming" as Verbosity,
                 },
               });
@@ -532,6 +604,8 @@ export const GChatChannel: ChannelDefinition = {
 - To react to messages: Use mcp__google-chat__add_reaction with the message ID from this prompt
 - To remove reactions: Use mcp__google-chat__remove_reaction
 - To list messages: Use mcp__google-chat__list_messages with the space ID
-- File attachments are not currently supported in Google Chat`;
+- To get attachments: Use mcp__google-chat__get_attachments with the message name
+- To download attachments: Use mcp__google-chat__download_attachment with the attachment name and output path
+- To send attachments: Use mcp__google-chat__send_attachment with the space name and file path`;
   },
 };
