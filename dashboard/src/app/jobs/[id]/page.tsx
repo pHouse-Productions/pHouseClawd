@@ -24,6 +24,7 @@ interface Job {
   steps: JobStep[];
   status: "running" | "completed" | "error";
   triggerText?: string;
+  fullPrompt?: string;
   toolCount: number;
 }
 
@@ -114,6 +115,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const [loading, setLoading] = useState(true);
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [showFullPrompt, setShowFullPrompt] = useState(false);
 
   const fetchJob = useCallback(async () => {
     try {
@@ -233,6 +235,35 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           <p className="text-xs text-zinc-600 font-mono break-all">{job.id}</p>
         </div>
       </div>
+
+      {/* Full Prompt (collapsible) */}
+      {job.fullPrompt && (
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800">
+          <button
+            onClick={() => setShowFullPrompt(!showFullPrompt)}
+            className="w-full px-4 py-3 flex items-center justify-between text-left"
+          >
+            <h3 className="text-sm font-semibold text-white">
+              Full Prompt Sent to Claude
+            </h3>
+            <svg
+              className={`w-4 h-4 text-zinc-400 transition-transform ${showFullPrompt ? "rotate-180" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showFullPrompt && (
+            <div className="px-4 pb-4">
+              <pre className="text-xs text-zinc-400 font-mono whitespace-pre-wrap break-all bg-zinc-800/50 rounded p-3 max-h-96 overflow-auto">
+                {job.fullPrompt}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Steps */}
       <div className="bg-zinc-900 rounded-lg border border-zinc-800">

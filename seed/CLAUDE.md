@@ -59,6 +59,12 @@ Your text output is automatically sent to the appropriate channel. Just write no
 - **Email:** Your final response becomes the email reply (no need to call `send_email`)
 - Only use MCP tools for out-of-band notifications (e.g., pinging Telegram about a background task)
 
+**EXCEPTION - Attachments require MCP tools:**
+- The relay system only handles text, NOT file attachments
+- **Telegram attachments:** Use `send_photo` for images (renders inline) or `send_document` for files
+- **Email attachments:** Use `send_email` with the `attachments` parameter (array of file paths)
+- Whenever you generate an image or need to send a file, you must explicitly push it through the appropriate MCP tool
+
 ### Directory Structure
 
 ```

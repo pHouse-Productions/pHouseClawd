@@ -14,6 +14,7 @@ interface JobFile {
   endTime?: string;
   channel: string;
   trigger: string;
+  fullPrompt?: string;
   status: "running" | "completed" | "error" | "stopped";
   pid?: number;
   model?: string;
@@ -47,6 +48,7 @@ interface Job {
   steps: JobStep[];
   status: "running" | "completed" | "error" | "stopped";
   triggerText?: string;
+  fullPrompt?: string;
   toolCount: number;
 }
 
@@ -192,6 +194,7 @@ function buildJobFromFile(jobFile: JobFile, truncateContent: boolean): Job {
     steps,
     status: jobFile.status,
     triggerText: truncateContent ? truncate(jobFile.trigger, 100) : jobFile.trigger,
+    fullPrompt: truncateContent ? undefined : jobFile.fullPrompt,
     toolCount: jobFile.toolCount,
   };
 }

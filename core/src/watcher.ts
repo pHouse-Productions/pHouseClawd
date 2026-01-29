@@ -236,6 +236,7 @@ interface JobData {
   endTime?: string;
   channel: string;
   trigger: string;
+  fullPrompt?: string;
   status: "running" | "completed" | "error" | "stopped";
   pid?: number;
   model?: string;
@@ -261,12 +262,13 @@ function getJobFilePath(jobId: string): string {
   return path.join(JOBS_DIR, `${jobId}.json`);
 }
 
-function createJobFile(jobId: string, channel: string, trigger: string, pid?: number): void {
+function createJobFile(jobId: string, channel: string, trigger: string, pid?: number, fullPrompt?: string): void {
   const jobData: JobData = {
     id: jobId,
     startTime: new Date().toISOString(),
     channel,
     trigger,
+    fullPrompt,
     status: "running",
     pid,
     toolCount: 0,
@@ -839,7 +841,7 @@ async function handleChannelEvent(
     );
 
     // Track PID in job file and in-memory map, plus session mapping
-    createJobFile(jobId, channel.name, prompt.slice(0, 500), proc.pid);
+    createJobFile(jobId, channel.name, prompt.slice(0, 500), proc.pid, finalPrompt);
     runningJobs.set(jobId, proc);
     jobToSession.set(jobId, sessionKey);
 
@@ -1227,7 +1229,10 @@ async function handleCronJob(job: CronJob): Promise<void> {
   // Add reminder to log outbound messages for visibility
   const loggingReminder = `IMPORTANT: Before calling send_message or send_email, always output the message content as text first. This ensures the message gets logged. Example: "Sending to Mike: [your message here]" then call the MCP tool.`;
 
-  const prompt = `[Scheduled Task: ${job.description}]\n\n${loggingReminder}\n\n${job.prompt}`;
+  // Inject memory context so cron jobs have the same awareness as interactive sessions
+  const memoryContext = getRecentTranscriptContext();
+
+  const prompt = `[Scheduled Task: ${job.description}]\n\n${loggingReminder}${memoryContext}\n${job.prompt}`;
 
   const generation = getSessionGeneration(sessionKey);
   const sessionId = generateSessionId(`${sessionKey}-gen${generation}`);
@@ -1264,7 +1269,7 @@ async function handleCronJob(job: CronJob): Promise<void> {
     );
 
     // Track PID in job file and in-memory map
-    createJobFile(jobFileId, "cron", `[${job.description}] ${prompt.slice(0, 400)}`, proc.pid);
+    createJobFile(jobFileId, "cron", `[${job.description}] ${prompt.slice(0, 400)}`, proc.pid, prompt);
     runningJobs.set(jobFileId, proc);
 
     let lineBuffer = "";
