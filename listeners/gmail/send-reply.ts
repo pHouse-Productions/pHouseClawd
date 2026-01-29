@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 /**
  * Standalone script to send an email reply
- * Usage: npx tsx send-reply.ts <to> <subject> <body> [threadId] [inReplyToMessageId]
+ * Usage: npx tsx send-reply.ts <to> <subject> <plainBody> <htmlBody> [threadId] [inReplyToMessageId]
  */
 
 import { google } from "googleapis";
@@ -44,30 +44,49 @@ function getOAuth2Client() {
 async function sendEmail(
   to: string,
   subject: string,
-  body: string,
+  plainBody: string,
+  htmlBody: string,
   threadId?: string,
   inReplyTo?: string
 ): Promise<string> {
   const auth = getOAuth2Client();
   const gmail = google.gmail({ version: "v1", auth });
 
-  const messageParts = [
+  // Generate a unique boundary for multipart message
+  const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+
+  const headers = [
     `To: ${to}`,
     `Subject: ${subject}`,
   ];
 
   // Add threading headers if we have the original message ID
   if (inReplyTo) {
-    messageParts.push(`In-Reply-To: ${inReplyTo}`);
-    messageParts.push(`References: ${inReplyTo}`);
+    headers.push(`In-Reply-To: ${inReplyTo}`);
+    headers.push(`References: ${inReplyTo}`);
   }
 
-  messageParts.push(
+  headers.push(
     "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=utf-8",
-    "",
-    body
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
   );
+
+  // Build multipart message with both plain text and HTML
+  const messageParts = [
+    headers.join("\r\n"),
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "Content-Transfer-Encoding: quoted-printable",
+    "",
+    plainBody,
+    `--${boundary}`,
+    "Content-Type: text/html; charset=utf-8",
+    "Content-Transfer-Encoding: quoted-printable",
+    "",
+    htmlBody,
+    `--${boundary}--`,
+  ];
 
   const message = messageParts.join("\r\n");
   const encodedMessage = Buffer.from(message)
@@ -94,19 +113,20 @@ async function sendEmail(
 }
 
 async function main() {
-  const [, , to, subject, body, threadId, inReplyTo] = process.argv;
+  const [, , to, subject, plainBody, htmlBody, threadId, inReplyTo] = process.argv;
 
-  if (!to || !subject || !body) {
-    console.error("Usage: npx tsx send-reply.ts <to> <subject> <body> [threadId] [inReplyToMessageId]");
+  if (!to || !subject || !plainBody) {
+    console.error("Usage: npx tsx send-reply.ts <to> <subject> <plainBody> <htmlBody> [threadId] [inReplyToMessageId]");
     process.exit(1);
   }
 
   try {
     // Empty strings become undefined
+    const html = htmlBody && htmlBody.trim() ? htmlBody : `<pre>${plainBody}</pre>`;
     const tid = threadId && threadId.trim() ? threadId : undefined;
     const replyTo = inReplyTo && inReplyTo.trim() ? inReplyTo : undefined;
 
-    const messageId = await sendEmail(to, subject, body, tid, replyTo);
+    const messageId = await sendEmail(to, subject, plainBody, html, tid, replyTo);
     console.log(`Email sent successfully. Message ID: ${messageId}`);
   } catch (error) {
     console.error("Failed to send email:", error);

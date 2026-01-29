@@ -149,6 +149,7 @@ interface SessionData {
   generations: Record<string, number>;
   modes: Record<string, MemoryMode>; // Per-channel memory mode (session vs transcript)
   queueModes: Record<string, QueueMode>; // Per-channel queue mode (queue vs interrupt)
+  transcriptLines: Record<string, number>; // Per-channel transcript context lines
 }
 
 function loadSessionData(): SessionData {
@@ -156,12 +157,12 @@ function loadSessionData(): SessionData {
     if (fs.existsSync(SESSIONS_FILE)) {
       const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf-8"));
       if (Array.isArray(data)) {
-        return { known: data, generations: {}, modes: {}, queueModes: {} };
+        return { known: data, generations: {}, modes: {}, queueModes: {}, transcriptLines: {} };
       }
-      return { ...data, modes: data.modes || {}, queueModes: data.queueModes || {} };
+      return { ...data, modes: data.modes || {}, queueModes: data.queueModes || {}, transcriptLines: data.transcriptLines || {} };
     }
   } catch {}
-  return { known: [], generations: {}, modes: {}, queueModes: {} };
+  return { known: [], generations: {}, modes: {}, queueModes: {}, transcriptLines: {} };
 }
 
 function getMemoryMode(sessionKey: string): MemoryMode {
@@ -181,6 +182,18 @@ function getQueueMode(sessionKey: string): QueueMode {
 function setQueueMode(sessionKey: string, mode: QueueMode): void {
   const data = loadSessionData();
   data.queueModes[sessionKey] = mode;
+  saveSessionData(data);
+}
+
+const DEFAULT_TRANSCRIPT_LINES = 100;
+
+function getTranscriptLines(sessionKey: string): number {
+  return loadSessionData().transcriptLines[sessionKey] || DEFAULT_TRANSCRIPT_LINES;
+}
+
+function setTranscriptLines(sessionKey: string, lines: number): void {
+  const data = loadSessionData();
+  data.transcriptLines[sessionKey] = lines;
   saveSessionData(data);
 }
 
@@ -398,7 +411,6 @@ function getShortTermMemorySize(): number {
 }
 
 // Get recent messages from short-term memory for transcript mode injection
-const TRANSCRIPT_CONTEXT_LINES = 30; // Last 30 messages
 const LONG_TERM_MEMORY_DIR = path.join(PROJECT_ROOT, "memory/long-term");
 
 function getMemoryFilesInfo(): string {
@@ -427,16 +439,17 @@ Use \`read_short_term\` to see it, or \`search_memory\` to search across all mem
   }
 }
 
-function getRecentTranscriptContext(): string {
+function getRecentTranscriptContext(sessionKey?: string): string {
   try {
     const memoryInfo = getMemoryFilesInfo();
+    const contextLines = sessionKey ? getTranscriptLines(sessionKey) : DEFAULT_TRANSCRIPT_LINES;
 
     if (!fs.existsSync(SHORT_TERM_MEMORY_FILE)) {
       return memoryInfo ? `\n\n${memoryInfo}` : "";
     }
     const content = fs.readFileSync(SHORT_TERM_MEMORY_FILE, "utf-8");
     const lines = content.trim().split("\n").filter(l => l.trim());
-    const recentLines = lines.slice(-TRANSCRIPT_CONTEXT_LINES);
+    const recentLines = lines.slice(-contextLines);
     if (recentLines.length === 0) {
       return memoryInfo ? `\n\n${memoryInfo}` : "";
     }
@@ -701,17 +714,28 @@ async function handleChannelEvent(
     }
 
     // Memory mode commands (session vs transcript)
-    if (text === "/memory session" || text === "/memory transcript") {
-      const newMode = text === "/memory session" ? "session" : "transcript";
-      setMemoryMode(sessionKey, newMode);
-      log(`[Watcher] Memory mode changed to ${newMode} for ${sessionKey}`);
+    if (text === "/memory session") {
+      setMemoryMode(sessionKey, "session");
+      log(`[Watcher] Memory mode changed to session for ${sessionKey}`);
       const handler = channel.createHandler(event);
       handler.onComplete(0);
-      if (newMode === "session") {
-        sendReply("Switched to session memory. I'll remember our conversation within this session.");
-      } else {
-        sendReply("Switched to transcript memory. Each message is a fresh session, but I'll see recent history from all channels.");
+      sendReply("Switched to session memory. I'll remember our conversation within this session.");
+      return;
+    }
+
+    // /memory transcript [optional lines count]
+    const transcriptMatch = text.match(/^\/memory transcript(?:\s+(\d+))?$/);
+    if (transcriptMatch) {
+      setMemoryMode(sessionKey, "transcript");
+      const lines = transcriptMatch[1] ? parseInt(transcriptMatch[1], 10) : null;
+      if (lines !== null) {
+        setTranscriptLines(sessionKey, lines);
       }
+      const currentLines = getTranscriptLines(sessionKey);
+      log(`[Watcher] Memory mode changed to transcript for ${sessionKey} (${currentLines} lines)`);
+      const handler = channel.createHandler(event);
+      handler.onComplete(0);
+      sendReply(`Switched to transcript memory. Each message is a fresh session, but I'll see the last ${currentLines} messages from all channels.`);
       return;
     }
 
@@ -719,7 +743,12 @@ async function handleChannelEvent(
       const currentMode = getMemoryMode(sessionKey);
       const handler = channel.createHandler(event);
       handler.onComplete(0);
-      sendReply(`Memory mode: ${currentMode}\n\nUse /memory session or /memory transcript to switch.`);
+      if (currentMode === "transcript") {
+        const currentLines = getTranscriptLines(sessionKey);
+        sendReply(`Memory mode: transcript (${currentLines} lines)\n\nUse /memory session or /memory transcript [lines] to switch.`);
+      } else {
+        sendReply(`Memory mode: ${currentMode}\n\nUse /memory session or /memory transcript [lines] to switch.`);
+      }
       return;
     }
 
@@ -800,7 +829,7 @@ async function handleChannelEvent(
 
   // In transcript mode, inject recent history into the prompt
   if (isTranscriptMode) {
-    const recentHistory = getRecentTranscriptContext();
+    const recentHistory = getRecentTranscriptContext(sessionKey);
     if (recentHistory) {
       finalPrompt = recentHistory + finalPrompt;
     }

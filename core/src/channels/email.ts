@@ -3,6 +3,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { marked } from "marked";
 import type { ChannelDefinition, ChannelEvent, ChannelEventHandler, StreamEvent } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -119,6 +120,11 @@ class EmailEventHandler implements ChannelEventHandler {
 
     const text = this.extractText(event);
     if (text) {
+      // For assistant message blocks, add newline separator if buffer already has content
+      // This prevents chunks from getting mashed together
+      if (event.type === "assistant" && this.textBuffer.length > 0 && !this.textBuffer.endsWith("\n")) {
+        this.textBuffer += "\n\n";
+      }
       this.textBuffer += text;
     }
   }
@@ -159,12 +165,16 @@ class EmailEventHandler implements ChannelEventHandler {
     const { replyTo, subject, threadId, messageId } = this.config;
     const replySubject = subject.startsWith("Re:") ? subject : `Re: ${subject}`;
 
+    // Convert markdown to HTML for nicer formatting
+    const htmlBody = marked.parse(body) as string;
+
     const args = [
       "tsx",
       path.join(PROJECT_ROOT, "listeners/gmail/send-reply.ts"),
       replyTo,
       replySubject,
       body,
+      htmlBody,
       threadId || "",
       messageId || "",
     ];
@@ -248,6 +258,7 @@ export const EmailChannel: ChannelDefinition = {
               message_id: getHeader(headers, "Message-ID") || getHeader(headers, "Message-Id"),
               from,
               to: getHeader(headers, "To"),
+              cc: getHeader(headers, "Cc") || getHeader(headers, "CC"),
               subject: getHeader(headers, "Subject"),
               date: getHeader(headers, "Date"),
               body: extractBody(detail.data.payload),
@@ -259,8 +270,14 @@ export const EmailChannel: ChannelDefinition = {
             // Create session key from thread_id or subject
             const sessionKey = `email-${email.thread_id || email.subject.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 50)}`;
 
+            // Build recipient info
+            const recipients: string[] = [];
+            if (email.to) recipients.push(`To: ${email.to}`);
+            if (email.cc) recipients.push(`CC: ${email.cc}`);
+            const recipientInfo = recipients.length > 0 ? `${recipients.join('\n')}\n` : '';
+
             const prompt = `[Email from ${email.from}]
-Subject: ${email.subject}
+${recipientInfo}Subject: ${email.subject}
 Date: ${email.date}
 
 ${email.body}`;

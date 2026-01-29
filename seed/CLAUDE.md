@@ -139,7 +139,7 @@ These slash commands control the watcher and session behavior. Users can type th
 | `/new` | Start a fresh session, clears conversation history |
 | `/memory` | Show current memory mode |
 | `/memory session` | Keep full conversation context within the session |
-| `/memory transcript` | Each message is fresh but sees recent history from all channels |
+| `/memory transcript [N]` | Each message is fresh but sees last N messages (default: 100) |
 | `/queue` | Show current queue mode |
 | `/queue on` | Messages queue up and process in order |
 | `/queue off` | New messages interrupt and take over (default) |
