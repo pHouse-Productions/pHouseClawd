@@ -732,19 +732,48 @@ export default function ConfigPage() {
       <ConfigSection title="Channels">
         <p className="text-zinc-500 text-xs mb-4">Enable or disable communication channels</p>
         {config.channels?.channels &&
-          Object.entries(config.channels.channels).map(([channel, settings]) => (
+          Object.entries(config.channels.channels).map(([channel, settings]) => {
+            // Check prerequisites for each channel
+            const googleAuthConfigured = config.googleToken.status === "configured";
+            const telegramConfigured = config.telegram.TELEGRAM_BOT_TOKEN && config.telegram.TELEGRAM_BOT_TOKEN !== "";
+
+            let canEnable = true;
+            let missingRequirement = "";
+
+            if (channel === "email" || channel === "gchat") {
+              if (!googleAuthConfigured) {
+                canEnable = false;
+                missingRequirement = "Google OAuth token required";
+              }
+            } else if (channel === "telegram") {
+              if (!telegramConfigured) {
+                canEnable = false;
+                missingRequirement = "Telegram Bot Token required";
+              }
+            }
+
+            return (
             <div key={channel} className="border-b border-zinc-800 last:border-0 py-3 first:pt-0">
               <div className="flex items-center justify-between">
-                <span className="text-white capitalize">{channel === "gchat" ? "Google Chat" : channel}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-white capitalize">{channel === "gchat" ? "Google Chat" : channel}</span>
+                  {!canEnable && (
+                    <span className="text-xs text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded">
+                      {missingRequirement}
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={() => {
+                    if (!canEnable && !settings.enabled) return; // Can't enable without prerequisites
                     const newChannels = { ...config.channels!.channels };
                     newChannels[channel] = { enabled: !settings.enabled };
                     saveChannels(newChannels);
                   }}
+                  disabled={!canEnable && !settings.enabled}
                   className={`relative w-11 h-6 rounded-full transition-colors ${
                     settings.enabled ? "bg-green-600" : "bg-zinc-700"
-                  }`}
+                  } ${!canEnable && !settings.enabled ? "opacity-50 cursor-not-allowed" : ""}`}
                 >
                   <div
                     className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
@@ -770,7 +799,8 @@ export default function ConfigPage() {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
       </ConfigSection>
 
       {/* Email Security */}
