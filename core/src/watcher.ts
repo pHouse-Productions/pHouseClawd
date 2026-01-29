@@ -1204,7 +1204,7 @@ async function handleCronJob(job: CronJob): Promise<void> {
   const sessionKey = `cron-${job.id}`;
 
   // Add reminder to log outbound messages for visibility
-  const loggingReminder = `IMPORTANT: Before calling send_message or send_email, always output the message content as text first. This ensures the message gets logged. Example: "Sending to Mike: [your message here]" then call the MCP tool.`;
+  const loggingReminder = `IMPORTANT: Before calling send_message or send_email, always output the message content as text first. This ensures the message gets logged. Example: "Sending message: [your message here]" then call the MCP tool.`;
 
   // Inject memory context so cron jobs have the same awareness as interactive sessions
   const memoryContext = getRecentTranscriptContext();
