@@ -23,24 +23,31 @@ const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-securit
 
 interface EmailSecurityConfig {
   trustedEmailAddresses: string[];
-  alertTelegramChatId: number | null;
-  forwardUntrustedTo: string | null;
+  forwardUntrustedTo: string[];
 }
 
 function loadEmailSecurityConfig(): EmailSecurityConfig {
   try {
     if (fs.existsSync(EMAIL_SECURITY_CONFIG_FILE)) {
       const config = JSON.parse(fs.readFileSync(EMAIL_SECURITY_CONFIG_FILE, "utf-8"));
+      // Handle both array and legacy string format for forwardUntrustedTo
+      let forwardTo = config.forwardUntrustedTo || [];
+      if (typeof forwardTo === "string") {
+        forwardTo = forwardTo ? [forwardTo] : [];
+      }
+      // Fallback: if forwardUntrustedTo is empty, use trustedEmailAddresses
+      if (forwardTo.length === 0) {
+        forwardTo = config.trustedEmailAddresses || [];
+      }
       return {
         trustedEmailAddresses: config.trustedEmailAddresses || [],
-        alertTelegramChatId: config.alertTelegramChatId || null,
-        forwardUntrustedTo: config.forwardUntrustedTo || null,
+        forwardUntrustedTo: forwardTo,
       };
     }
   } catch (err) {
     log(`[EmailChannel] Failed to load security config: ${err}`);
   }
-  return { trustedEmailAddresses: [], alertTelegramChatId: null, forwardUntrustedTo: null };
+  return { trustedEmailAddresses: [], forwardUntrustedTo: [] };
 }
 
 function isTrustedSender(fromAddress: string): boolean {
@@ -53,32 +60,35 @@ function isTrustedSender(fromAddress: string): boolean {
 
 async function forwardUntrustedEmail(email: { from: string; date: string; subject: string; body: string }): Promise<void> {
   const config = loadEmailSecurityConfig();
-  if (!config.forwardUntrustedTo) return;
+  if (config.forwardUntrustedTo.length === 0) return;
 
   const forwardSubject = `Fwd: ${email.subject}`;
   const forwardBody = `---------- Forwarded message ----------\nFrom: ${email.from}\nDate: ${email.date}\nSubject: ${email.subject}\n\n${email.body}`;
 
-  const args = [
-    "tsx",
-    path.join(PROJECT_ROOT, "listeners/gmail/send-reply.ts"),
-    config.forwardUntrustedTo,
-    forwardSubject,
-    forwardBody,
-    "", // no HTML
-    "", // no threadId
-    "", // no messageId
-  ];
+  // Forward to all addresses in the list
+  for (const recipient of config.forwardUntrustedTo) {
+    const args = [
+      "tsx",
+      path.join(PROJECT_ROOT, "listeners/gmail/send-reply.ts"),
+      recipient,
+      forwardSubject,
+      forwardBody,
+      "", // no HTML
+      "", // no threadId
+      "", // no messageId
+    ];
 
-  try {
-    const proc = spawn("npx", args, {
-      cwd: PROJECT_ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-    });
-    proc.unref();
-    log(`[EmailChannel] Forwarded untrusted email to ${config.forwardUntrustedTo}`);
-  } catch (err) {
-    log(`[EmailChannel] Failed to forward: ${err}`);
+    try {
+      const proc = spawn("npx", args, {
+        cwd: PROJECT_ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+      });
+      proc.unref();
+      log(`[EmailChannel] Forwarded untrusted email to ${recipient}`);
+    } catch (err) {
+      log(`[EmailChannel] Failed to forward to ${recipient}: ${err}`);
+    }
   }
 }
 

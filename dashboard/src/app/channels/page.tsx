@@ -38,7 +38,7 @@ interface ConfigData {
   } | null;
   emailSecurity: {
     trustedEmailAddresses: string[];
-    alertTelegramChatId: number | null;
+    forwardUntrustedTo: string[];
   } | null;
   gchatSecurity: {
     allowedSpaces: string[];
@@ -140,7 +140,7 @@ export default function ChannelsPage() {
     }
   };
 
-  const saveEmailSecurity = async (emailSecurity: { trustedEmailAddresses: string[]; alertTelegramChatId: number | null }) => {
+  const saveEmailSecurity = async (emailSecurity: { trustedEmailAddresses: string[]; forwardUntrustedTo: string[] }) => {
     try {
       const res = await authFetch("/api/config", {
         method: "POST",
@@ -466,27 +466,44 @@ export default function ChannelsPage() {
 
       {/* Email Security */}
       <ConfigSection title="Email Security">
-        <div>
-          <label className="text-white text-sm font-medium">Trusted Email Addresses</label>
-          <p className="text-zinc-500 text-xs mt-1 mb-2">
-            Emails from these addresses will be processed directly. Others require Telegram approval.
-          </p>
-          <TrustedEmailsEditor
-            emails={config.emailSecurity?.trustedEmailAddresses || []}
-            onSave={(emails) =>
-              saveEmailSecurity({
-                trustedEmailAddresses: emails,
-                alertTelegramChatId: config.emailSecurity?.alertTelegramChatId || null,
-              })
-            }
-          />
+        <div className="space-y-6">
+          <div>
+            <label className="text-white text-sm font-medium">Trusted Senders</label>
+            <p className="text-zinc-500 text-xs mt-1 mb-2">
+              Emails from these addresses will be processed and replied to directly.
+            </p>
+            <EmailListEditor
+              emails={config.emailSecurity?.trustedEmailAddresses || []}
+              onSave={(emails) =>
+                saveEmailSecurity({
+                  trustedEmailAddresses: emails,
+                  forwardUntrustedTo: config.emailSecurity?.forwardUntrustedTo || [],
+                })
+              }
+            />
+          </div>
+          <div>
+            <label className="text-white text-sm font-medium">Forward Untrusted To</label>
+            <p className="text-zinc-500 text-xs mt-1 mb-2">
+              Emails from untrusted senders will be forwarded to these addresses. Falls back to trusted senders if empty.
+            </p>
+            <EmailListEditor
+              emails={config.emailSecurity?.forwardUntrustedTo || []}
+              onSave={(emails) =>
+                saveEmailSecurity({
+                  trustedEmailAddresses: config.emailSecurity?.trustedEmailAddresses || [],
+                  forwardUntrustedTo: emails,
+                })
+              }
+            />
+          </div>
         </div>
       </ConfigSection>
     </div>
   );
 }
 
-function TrustedEmailsEditor({
+function EmailListEditor({
   emails,
   onSave,
 }: {
