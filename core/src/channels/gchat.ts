@@ -139,15 +139,55 @@ const MIN_CHARS_TO_FLUSH = 50;
 // Handler for a single GChat event
 class GChatEventHandler implements ChannelEventHandler {
   private spaceName: string;
+  private messageName: string;
   private verbosity: Verbosity;
   private textBuffer: string = "";
   private lastFlush: number = Date.now();
   private flushTimer: NodeJS.Timeout | null = null;
   private isComplete: boolean = false;
+  private reactionName: string | null = null;
 
-  constructor(spaceName: string, verbosity: Verbosity = "streaming") {
+  constructor(spaceName: string, messageName: string, verbosity: Verbosity = "streaming") {
     this.spaceName = spaceName;
+    this.messageName = messageName;
     this.verbosity = verbosity;
+
+    // Add eyes reaction to show we're working on it
+    this.addWorkingReaction();
+  }
+
+  private async addWorkingReaction(): Promise<void> {
+    if (!this.messageName) return;
+
+    try {
+      const auth = getOAuth2Client();
+      const chat = google.chat({ version: "v1", auth });
+      const response = await chat.spaces.messages.reactions.create({
+        parent: this.messageName,
+        requestBody: {
+          emoji: { unicode: "👀" },
+        },
+      });
+      this.reactionName = response.data.name || null;
+      log(`[GChatChannel] Added working reaction to ${this.messageName}`);
+    } catch (err) {
+      log(`[GChatChannel] Failed to add working reaction: ${err}`);
+    }
+  }
+
+  private async removeWorkingReaction(): Promise<void> {
+    if (!this.reactionName) return;
+
+    try {
+      const auth = getOAuth2Client();
+      const chat = google.chat({ version: "v1", auth });
+      await chat.spaces.messages.reactions.delete({
+        name: this.reactionName,
+      });
+      log(`[GChatChannel] Removed working reaction from ${this.messageName}`);
+    } catch (err) {
+      log(`[GChatChannel] Failed to remove working reaction: ${err}`);
+    }
   }
 
   onStreamEvent(event: StreamEvent): void {
@@ -184,6 +224,9 @@ class GChatEventHandler implements ChannelEventHandler {
       this.sendMessage(this.textBuffer.trim());
       this.textBuffer = "";
     }
+
+    // Remove the working reaction
+    this.removeWorkingReaction();
 
     log(`[GChatChannel] Complete for space ${this.spaceName}, code ${code}`);
   }
@@ -411,7 +454,7 @@ export const GChatChannel: ChannelDefinition = {
               }
 
               const sessionKey = `gchat-${spaceName.replace(/\//g, "-")}`;
-              const prompt = `[Google Chat from ${senderDisplayName || "Someone"}]: ${text}`;
+              const prompt = `[Google Chat from ${senderDisplayName || "Someone"} | space: ${spaceName} | msg: ${msgName}]: ${text}`;
 
               onEvent({
                 sessionKey,
@@ -467,6 +510,6 @@ export const GChatChannel: ChannelDefinition = {
 
   createHandler(event: ChannelEvent): ChannelEventHandler {
     const verbosity = event.payload.verbosity || "streaming";
-    return new GChatEventHandler(event.payload.space_name, verbosity);
+    return new GChatEventHandler(event.payload.space_name, event.payload.message_name, verbosity);
   },
 };
