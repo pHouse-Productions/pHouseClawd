@@ -44,6 +44,7 @@ const JOBS_DIR = path.join(LOGS_DIR, "jobs");
 const LOG_FILE = path.join(LOGS_DIR, "watcher.log");
 const SESSIONS_FILE = path.join(LOGS_DIR, "sessions.json");
 const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
+const PID_FILE = path.join(PROJECT_ROOT, "watcher.pid");
 
 // Ensure jobs directory exists
 if (!fs.existsSync(JOBS_DIR)) {
@@ -1374,6 +1375,10 @@ function scheduleCronJobs(): void {
 async function watch(): Promise<void> {
   log("[Watcher] Starting unified watcher...");
 
+  // Write PID file
+  fs.writeFileSync(PID_FILE, process.pid.toString(), "utf-8");
+  log(`[Watcher] PID file written: ${PID_FILE} (PID: ${process.pid})`);
+
   // Load channel config
   const channelsConfig = loadChannelsConfig();
 
@@ -1439,6 +1444,15 @@ async function watch(): Promise<void> {
     }
     for (const [, timeout] of activeTimeouts) {
       clearTimeout(timeout);
+    }
+    // Remove PID file
+    try {
+      if (fs.existsSync(PID_FILE)) {
+        fs.unlinkSync(PID_FILE);
+        log("[Watcher] PID file removed");
+      }
+    } catch (err) {
+      log(`[Watcher] Failed to remove PID file: ${err}`);
     }
     process.exit(0);
   };
