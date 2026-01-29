@@ -91,10 +91,10 @@ function finalizeJob(jobId: string, status: "completed" | "error" | "stopped", c
   }
 }
 
-const FIX_PROMPT = `You are Vito, Mike's personal AI assistant. The watcher service is having trouble starting. Your job is to diagnose and fix the issue.
+const FIX_PROMPT = `The watcher service is having trouble starting. Your job is to diagnose and fix the issue.
 
 ## Context
-- The watcher is the main orchestration service that handles incoming messages from Telegram, Gmail, and Google Chat
+- The watcher is the main orchestration service that handles incoming messages from various channels (Telegram, Gmail, Google Chat, etc.)
 - It runs from: /home/ubuntu/pHouseClawd/core/src/watcher.ts
 - Started via: tsx core/src/watcher.ts
 - The dashboard is calling you because the user clicked "Emergency Fix" - meaning the watcher won't start
