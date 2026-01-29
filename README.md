@@ -420,12 +420,14 @@ Claude will generate a dashboard password during setup. You can change it anytim
 ```bash
 cd pHouseClawd
 git pull origin main
+cd core && npm install && cd ..  # Install any new dependencies
 ```
 
 **pHouseMcp:**
 ```bash
 cd pHouseMcp
 git pull origin master
+npm install    # Install any new dependencies
 npm run build  # Rebuild after pulling updates!
 ```
 
