@@ -143,14 +143,14 @@ pHouseClawd/
 
 ## MCP Servers (Tools)
 
-The MCP (Model Context Protocol) servers that give your assistant its capabilities live in a separate repository: **[pHouseMcp](https://github.com/mcarcaso/pHouseMcp)**
+The MCP (Model Context Protocol) servers that give your assistant its capabilities live in a separate repository: **[pHouseMcp](https://github.com/pHouse-Productions/pHouseMcp)**
 
 This separation keeps the tools modular and shareable. You'll need both repos:
 
 ```bash
 # Clone both repos side by side
 git clone https://github.com/pHouse-Productions/pHouseClawd.git
-git clone https://github.com/mcarcaso/pHouseMcp.git
+git clone https://github.com/pHouse-Productions/pHouseMcp.git
 ```
 
 ### Setting up MCPs
@@ -161,14 +161,21 @@ git clone https://github.com/mcarcaso/pHouseMcp.git
    npm install
    ```
 
-2. **Create credentials directory and .env file:**
+2. **Build the servers (compile TypeScript to JavaScript):**
+   ```bash
+   npm run build
+   ```
+
+   **Important:** This step is required! The servers run from compiled JavaScript for faster startup times. See the [pHouseMcp README](https://github.com/pHouse-Productions/pHouseMcp) for more details.
+
+3. **Create credentials directory and .env file:**
    ```bash
    mkdir -p credentials
    cp .env.example .env
    # Edit .env with your API keys
    ```
 
-3. **Add MCP servers to Claude:**
+4. **Add MCP servers to Claude:**
 
    Edit `~/.claude.json` to add the servers you want. Example for Telegram:
    ```json
@@ -176,14 +183,19 @@ git clone https://github.com/mcarcaso/pHouseMcp.git
      "mcpServers": {
        "telegram": {
          "type": "stdio",
-         "command": "npx",
-         "args": ["--prefix", "/path/to/pHouseMcp/servers/telegram", "tsx", "/path/to/pHouseMcp/servers/telegram/src/mcp.ts"]
+         "command": "node",
+         "args": ["/path/to/pHouseMcp/servers/telegram/dist/mcp.js"],
+         "env": {
+           "TELEGRAM_BOT_TOKEN": "your_token"
+         }
        }
      }
    }
    ```
 
-   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `google-calendar`, `image-gen`, `yahoo-finance`, `cron`, `memory`, `pdf`
+   **Note:** We use `node dist/mcp.js` (compiled JavaScript) instead of `npx tsx src/mcp.ts` for faster MCP startup times.
+
+   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `google-calendar`, `google-chat`, `image-gen`, `yahoo-finance`, `cron`, `memory`, `pdf`
 
 ### Recommended Third-Party MCP
 
@@ -404,8 +416,17 @@ Claude will generate a dashboard password during setup. You can change it anytim
 
 ## Updating
 
+**pHouseClawd:**
 ```bash
+cd pHouseClawd
 git pull origin main
+```
+
+**pHouseMcp:**
+```bash
+cd pHouseMcp
+git pull origin master
+npm run build  # Rebuild after pulling updates!
 ```
 
 Your personal files (`CLAUDE.md`, `config/*.json`, `memory/`, `leads/`) are gitignored and won't be affected.
