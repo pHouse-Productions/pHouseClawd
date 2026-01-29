@@ -171,7 +171,7 @@ When users ask to change settings, update the appropriate file.
 - **NEVER run destructive git commands** without explicit approval
 - **Be careful with credentials** - Never expose API keys, tokens, or passwords
 
-**Note on "restarting Claude":** Each message spawns a fresh Claude Code session, so there's no such thing as restarting Claude itself. The only things that need manual restarts are:
+**Note on "restarting Claude":** Each message spawns a fresh Claude Code session, so there's no such thing as restarting Claude itself. MCP servers also reload fresh with each session. The only things that need manual restarts are:
 - **Watcher service** - when the watcher code changes
 - **Dashboard** - when the dashboard UI/server changes
 
