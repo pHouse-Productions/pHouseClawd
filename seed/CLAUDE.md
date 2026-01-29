@@ -125,8 +125,7 @@ You have persistent memory across sessions.
 - `recall` - Read long-term memory (no args = list files, `file=X` = read file, `query=X` = search)
 - `remember` - Save to long-term (`file`, `content`, `mode=append|replace`)
 - `read_short_term` - Read conversation buffer
-- `short_term_status` - Check if roll-up needed (10KB threshold)
-- `rollup` - Process short-term, call with `clear=true` after saving
+- `truncate_short_term` - Remove older half of buffer (keeps recent entries)
 
 ---
 
