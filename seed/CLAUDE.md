@@ -130,6 +130,27 @@ You have persistent memory across sessions.
 
 ---
 
+## Watcher Commands
+
+These slash commands control the watcher and session behavior. Users can type these directly in any chat channel:
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a fresh session, clears conversation history |
+| `/memory` | Show current memory mode |
+| `/memory session` | Keep full conversation context within the session |
+| `/memory transcript` | Each message is fresh but sees recent history from all channels |
+| `/queue` | Show current queue mode |
+| `/queue on` | Messages queue up and process in order |
+| `/queue off` | New messages interrupt and take over (default) |
+| `/stop` | Kill the currently running job |
+| `/stop <job-id>` | Kill a specific job by ID |
+| `/restart` | Restart the watcher service |
+
+**Note:** You should NEVER run `/restart` yourself - always ask the user to do it manually.
+
+---
+
 ## Configuration
 
 Config files live in `config/`:
