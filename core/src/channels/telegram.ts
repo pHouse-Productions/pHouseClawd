@@ -384,4 +384,15 @@ export const TelegramChannel: ChannelDefinition = {
     const verbosity = event.payload.verbosity || "streaming";
     return new TelegramEventHandler(event.payload.chat_id, verbosity);
   },
+
+  getSessionKey(payload: any): string {
+    return `telegram-${payload.chat_id}`;
+  },
+
+  getChannelContext(): string {
+    return `[Channel: Telegram]
+- To send images: Use mcp__telegram__send_photo (renders inline in chat)
+- To send files: Use mcp__telegram__send_document
+- Chat ID for this conversation is in the payload`;
+  },
 };

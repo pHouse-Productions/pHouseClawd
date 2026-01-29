@@ -61,33 +61,8 @@ if (!fs.existsSync(SHORT_TERM_MEMORY_DIR)) {
   fs.mkdirSync(SHORT_TERM_MEMORY_DIR, { recursive: true });
 }
 
-// Email security config
-const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-security.json");
-
 // Channel config
 const CHANNELS_CONFIG_FILE = path.join(PROJECT_ROOT, "config/channels.json");
-
-interface EmailSecurityConfig {
-  trustedEmailAddresses: string[];
-  alertTelegramChatId: number | null;
-  forwardUntrustedTo: string | null;
-}
-
-function loadEmailSecurityConfig(): EmailSecurityConfig {
-  try {
-    if (fs.existsSync(EMAIL_SECURITY_CONFIG_FILE)) {
-      const config = JSON.parse(fs.readFileSync(EMAIL_SECURITY_CONFIG_FILE, "utf-8"));
-      return {
-        trustedEmailAddresses: config.trustedEmailAddresses || [],
-        alertTelegramChatId: config.alertTelegramChatId || null,
-        forwardUntrustedTo: config.forwardUntrustedTo || null,
-      };
-    }
-  } catch (err) {
-    log(`[Security] Failed to load email security config: ${err}`);
-  }
-  return { trustedEmailAddresses: [], alertTelegramChatId: null, forwardUntrustedTo: null };
-}
 
 // Channel config types
 interface ChannelConfig {
@@ -165,8 +140,23 @@ function loadSessionData(): SessionData {
   return { known: [], generations: {}, modes: {}, queueModes: {}, transcriptLines: {} };
 }
 
+// Get base channel name for settings fallback (e.g., "email-abc123" -> "email")
+function getBaseChannelName(sessionKey: string): string | null {
+  const match = sessionKey.match(/^(telegram|email|gchat)-/);
+  return match ? match[1] : null;
+}
+
 function getMemoryMode(sessionKey: string): MemoryMode {
-  return loadSessionData().modes[sessionKey] || "session"; // Default to session mode
+  const data = loadSessionData();
+  // Try exact key first, then fall back to base channel
+  if (data.modes[sessionKey]) {
+    return data.modes[sessionKey];
+  }
+  const baseChannel = getBaseChannelName(sessionKey);
+  if (baseChannel && data.modes[baseChannel]) {
+    return data.modes[baseChannel];
+  }
+  return "session"; // Default to session mode
 }
 
 function setMemoryMode(sessionKey: string, mode: MemoryMode): void {
@@ -176,7 +166,16 @@ function setMemoryMode(sessionKey: string, mode: MemoryMode): void {
 }
 
 function getQueueMode(sessionKey: string): QueueMode {
-  return loadSessionData().queueModes[sessionKey] || "queue"; // Default to queue mode
+  const data = loadSessionData();
+  // Try exact key first, then fall back to base channel
+  if (data.queueModes[sessionKey]) {
+    return data.queueModes[sessionKey];
+  }
+  const baseChannel = getBaseChannelName(sessionKey);
+  if (baseChannel && data.queueModes[baseChannel]) {
+    return data.queueModes[baseChannel];
+  }
+  return "queue"; // Default to queue mode
 }
 
 function setQueueMode(sessionKey: string, mode: QueueMode): void {
@@ -188,7 +187,16 @@ function setQueueMode(sessionKey: string, mode: QueueMode): void {
 const DEFAULT_TRANSCRIPT_LINES = 100;
 
 function getTranscriptLines(sessionKey: string): number {
-  return loadSessionData().transcriptLines[sessionKey] || DEFAULT_TRANSCRIPT_LINES;
+  const data = loadSessionData();
+  // Try exact key first, then fall back to base channel
+  if (data.transcriptLines[sessionKey]) {
+    return data.transcriptLines[sessionKey];
+  }
+  const baseChannel = getBaseChannelName(sessionKey);
+  if (baseChannel && data.transcriptLines[baseChannel]) {
+    return data.transcriptLines[baseChannel];
+  }
+  return DEFAULT_TRANSCRIPT_LINES;
 }
 
 function setTranscriptLines(sessionKey: string, lines: number): void {
@@ -618,23 +626,6 @@ async function convertPdfToText(pdfPath: string): Promise<string> {
   });
 }
 
-// Send email (used for forwarding untrusted emails)
-async function sendEmail(to: string, subject: string, body: string): Promise<void> {
-  const args = ["tsx", path.join(PROJECT_ROOT, "listeners/gmail/send-reply.ts"), to, subject, body, "", ""];
-
-  try {
-    const proc = spawn("npx", args, {
-      cwd: PROJECT_ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-    });
-    proc.unref();
-    log(`[Email] Sent to ${to}: ${subject}`);
-  } catch (err) {
-    log(`[Email] Failed to send: ${err}`);
-  }
-}
-
 // Handle a single channel event
 async function handleChannelEvent(
   channel: ChannelDefinition,
@@ -672,39 +663,26 @@ async function handleChannelEvent(
   if ((channel.name === "telegram" || channel.name === "gchat") && payload.type === "message") {
     const text = payload.text?.trim().toLowerCase();
 
-    // Helper to send a message back to the channel
-    const sendReply = (message: string) => {
-      if (channel.name === "telegram") {
-        const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
-        spawn("npx", ["tsx", sendScript, String(payload.chat_id), message], {
-          cwd: PROJECT_ROOT,
-          stdio: ["ignore", "ignore", "ignore"],
-          detached: true,
-        }).unref();
-      } else if (channel.name === "gchat") {
-        const sendScript = path.join(PROJECT_ROOT, "listeners/gchat/send-message.ts");
-        spawn("npx", ["tsx", sendScript, payload.space_name, message], {
-          cwd: PROJECT_ROOT,
-          stdio: ["ignore", "ignore", "ignore"],
-          detached: true,
-        }).unref();
-      }
+    // Helper to send a quick response via synthesized stream event
+    const sendQuickReply = (message: string) => {
+      const handler = channel.createHandler(event);
+      handler.onStreamEvent({
+        type: "assistant",
+        message: { content: [{ type: "text", text: message }] }
+      });
+      handler.onComplete(0);
     };
 
     if (text === "/new") {
       clearSession(sessionKey);
       log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
-      const handler = channel.createHandler(event);
-      handler.onComplete(0);
-      sendReply("Fresh start, boss. New session is ready.");
+      sendQuickReply("Fresh start, boss. New session is ready.");
       return;
     }
 
     if (text === "/restart") {
       log(`[Watcher] Restart requested via /restart command`);
-      const handler = channel.createHandler(event);
-      handler.onComplete(0);
-      sendReply("Restarting... Back in a few seconds.");
+      sendQuickReply("Restarting... Back in a few seconds.");
       spawn(path.join(PROJECT_ROOT, "restart.sh"), [], {
         cwd: PROJECT_ROOT,
         stdio: ["ignore", "ignore", "ignore"],
@@ -717,9 +695,7 @@ async function handleChannelEvent(
     if (text === "/memory session") {
       setMemoryMode(sessionKey, "session");
       log(`[Watcher] Memory mode changed to session for ${sessionKey}`);
-      const handler = channel.createHandler(event);
-      handler.onComplete(0);
-      sendReply("Switched to session memory. I'll remember our conversation within this session.");
+      sendQuickReply("Switched to session memory. I'll remember our conversation within this session.");
       return;
     }
 
@@ -733,21 +709,17 @@ async function handleChannelEvent(
       }
       const currentLines = getTranscriptLines(sessionKey);
       log(`[Watcher] Memory mode changed to transcript for ${sessionKey} (${currentLines} lines)`);
-      const handler = channel.createHandler(event);
-      handler.onComplete(0);
-      sendReply(`Switched to transcript memory. Each message is a fresh session, but I'll see the last ${currentLines} messages from all channels.`);
+      sendQuickReply(`Switched to transcript memory. Each message is a fresh session, but I'll see the last ${currentLines} messages from all channels.`);
       return;
     }
 
     if (text === "/memory") {
       const currentMode = getMemoryMode(sessionKey);
-      const handler = channel.createHandler(event);
-      handler.onComplete(0);
       if (currentMode === "transcript") {
         const currentLines = getTranscriptLines(sessionKey);
-        sendReply(`Memory mode: transcript (${currentLines} lines)\n\nUse /memory session or /memory transcript [lines] to switch.`);
+        sendQuickReply(`Memory mode: transcript (${currentLines} lines)\n\nUse /memory session or /memory transcript [lines] to switch.`);
       } else {
-        sendReply(`Memory mode: ${currentMode}\n\nUse /memory session or /memory transcript [lines] to switch.`);
+        sendQuickReply(`Memory mode: ${currentMode}\n\nUse /memory session or /memory transcript [lines] to switch.`);
       }
       return;
     }
@@ -757,47 +729,25 @@ async function handleChannelEvent(
       const newMode = text === "/queue on" ? "queue" : "interrupt";
       setQueueMode(sessionKey, newMode);
       log(`[Watcher] Queue mode changed to ${newMode} for ${sessionKey}`);
-      const handler = channel.createHandler(event);
-      handler.onComplete(0);
       if (newMode === "queue") {
-        sendReply("Queue mode ON. Messages will pile up and process after the current job finishes.");
+        sendQuickReply("Queue mode ON. Messages will pile up and process after the current job finishes.");
       } else {
-        sendReply("Queue mode OFF (interrupt). New messages will kill the current job and start fresh.");
+        sendQuickReply("Queue mode OFF (interrupt). New messages will kill the current job and start fresh.");
       }
       return;
     }
 
     if (text === "/queue") {
       const currentMode = getQueueMode(sessionKey);
-      const handler = channel.createHandler(event);
-      handler.onComplete(0);
       const status = currentMode === "queue" ? "ON (messages queue up)" : "OFF (messages interrupt)";
-      sendReply(`Queue mode: ${status}\n\nUse /queue on or /queue off to switch.`);
+      sendQuickReply(`Queue mode: ${status}\n\nUse /queue on or /queue off to switch.`);
       return;
     }
 
     // Note: /stop is handled with priority in processEvent() before queueing
   }
 
-  // Email security check
-  if (channel.name === "email") {
-    const emailSecurityConfig = loadEmailSecurityConfig();
-    const emailAddress = payload.from.match(/<(.+)>/)?.[1] || payload.from;
-    const isTrustedSender = emailSecurityConfig.trustedEmailAddresses.some(
-      (trusted: string) => trusted.toLowerCase() === emailAddress.toLowerCase()
-    );
-
-    if (!isTrustedSender) {
-      log(`[Security] Untrusted email sender: ${payload.from} - blocking auto-reply`);
-      if (emailSecurityConfig.forwardUntrustedTo) {
-        const forwardSubject = `Fwd: ${payload.subject}`;
-        const forwardBody = `---------- Forwarded message ----------\nFrom: ${payload.from}\nDate: ${payload.date}\nSubject: ${payload.subject}\n\n${payload.body}`;
-        await sendEmail(emailSecurityConfig.forwardUntrustedTo, forwardSubject, forwardBody);
-        log(`[Security] Forwarded untrusted email to ${emailSecurityConfig.forwardUntrustedTo}`);
-      }
-      return;
-    }
-  }
+  // Note: Email security filtering is now handled by the email channel itself
 
   // Handle PDF conversion for documents
   let finalPrompt = prompt;
@@ -833,6 +783,12 @@ async function handleChannelEvent(
     if (recentHistory) {
       finalPrompt = recentHistory + finalPrompt;
     }
+  }
+
+  // Inject channel-specific context (tool instructions, capabilities)
+  const channelContext = channel.getChannelContext?.();
+  if (channelContext) {
+    finalPrompt = finalPrompt + `\n\n${channelContext}`;
   }
 
   // Create handler for this event
@@ -1002,23 +958,14 @@ async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Pr
     if (text === "/stop" || text?.startsWith("/stop ")) {
       log(`[Watcher] Processing /stop command with priority (bypassing queue)`);
 
-      // Helper to send a message back
-      const sendReply = (message: string) => {
-        if (channel.name === "telegram") {
-          const sendScript = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
-          spawn("npx", ["tsx", sendScript, String(payload.chat_id), message], {
-            cwd: PROJECT_ROOT,
-            stdio: ["ignore", "ignore", "ignore"],
-            detached: true,
-          }).unref();
-        } else if (channel.name === "gchat") {
-          const sendScript = path.join(PROJECT_ROOT, "listeners/gchat/send-message.ts");
-          spawn("npx", ["tsx", sendScript, payload.space_name, message], {
-            cwd: PROJECT_ROOT,
-            stdio: ["ignore", "ignore", "ignore"],
-            detached: true,
-          }).unref();
-        }
+      // Helper to send a quick response via synthesized stream event
+      const sendQuickReply = (message: string) => {
+        const handler = channel.createHandler(event);
+        handler.onStreamEvent({
+          type: "assistant",
+          message: { content: [{ type: "text", text: message }] }
+        });
+        handler.onComplete(0);
       };
 
       // Check if a specific job ID was provided
@@ -1029,18 +976,18 @@ async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Pr
         const killed = killJob(specificJobId);
         if (killed) {
           log(`[Watcher] Stopped job ${specificJobId} via /stop command`);
-          sendReply(`Done. Killed job ${specificJobId}.`);
+          sendQuickReply(`Done. Killed job ${specificJobId}.`);
         } else {
-          sendReply(`Couldn't find running job ${specificJobId}. It might have already finished.`);
+          sendQuickReply(`Couldn't find running job ${specificJobId}. It might have already finished.`);
         }
       } else {
         const runningJobId = getRunningJobId();
         if (runningJobId) {
           killJob(runningJobId);
           log(`[Watcher] Stopped running job ${runningJobId} via /stop command`);
-          sendReply(`Done. Killed the running job.`);
+          sendQuickReply(`Done. Killed the running job.`);
         } else {
-          sendReply(`Nothing running right now, boss.`);
+          sendQuickReply(`Nothing running right now, boss.`);
         }
       }
       return; // Don't queue or process further

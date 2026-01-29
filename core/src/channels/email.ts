@@ -18,6 +18,70 @@ const LOG_FILE = path.join(LOGS_DIR, "watcher.log");
 
 const POLL_INTERVAL = 60000; // Check every 60 seconds
 
+// Email security config
+const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-security.json");
+
+interface EmailSecurityConfig {
+  trustedEmailAddresses: string[];
+  alertTelegramChatId: number | null;
+  forwardUntrustedTo: string | null;
+}
+
+function loadEmailSecurityConfig(): EmailSecurityConfig {
+  try {
+    if (fs.existsSync(EMAIL_SECURITY_CONFIG_FILE)) {
+      const config = JSON.parse(fs.readFileSync(EMAIL_SECURITY_CONFIG_FILE, "utf-8"));
+      return {
+        trustedEmailAddresses: config.trustedEmailAddresses || [],
+        alertTelegramChatId: config.alertTelegramChatId || null,
+        forwardUntrustedTo: config.forwardUntrustedTo || null,
+      };
+    }
+  } catch (err) {
+    log(`[EmailChannel] Failed to load security config: ${err}`);
+  }
+  return { trustedEmailAddresses: [], alertTelegramChatId: null, forwardUntrustedTo: null };
+}
+
+function isTrustedSender(fromAddress: string): boolean {
+  const config = loadEmailSecurityConfig();
+  const emailAddress = fromAddress.match(/<(.+)>/)?.[1] || fromAddress;
+  return config.trustedEmailAddresses.some(
+    (trusted: string) => trusted.toLowerCase() === emailAddress.toLowerCase()
+  );
+}
+
+async function forwardUntrustedEmail(email: { from: string; date: string; subject: string; body: string }): Promise<void> {
+  const config = loadEmailSecurityConfig();
+  if (!config.forwardUntrustedTo) return;
+
+  const forwardSubject = `Fwd: ${email.subject}`;
+  const forwardBody = `---------- Forwarded message ----------\nFrom: ${email.from}\nDate: ${email.date}\nSubject: ${email.subject}\n\n${email.body}`;
+
+  const args = [
+    "tsx",
+    path.join(PROJECT_ROOT, "listeners/gmail/send-reply.ts"),
+    config.forwardUntrustedTo,
+    forwardSubject,
+    forwardBody,
+    "", // no HTML
+    "", // no threadId
+    "", // no messageId
+  ];
+
+  try {
+    const proc = spawn("npx", args, {
+      cwd: PROJECT_ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    proc.unref();
+    log(`[EmailChannel] Forwarded untrusted email to ${config.forwardUntrustedTo}`);
+  } catch (err) {
+    log(`[EmailChannel] Failed to forward: ${err}`);
+  }
+}
+
 function log(message: string) {
   const timestamp = new Date().toISOString();
   const line = `[${timestamp}] ${message}\n`;
@@ -267,8 +331,15 @@ export const EmailChannel: ChannelDefinition = {
             log(`[EmailChannel] New email from: ${email.from}`);
             log(`[EmailChannel] Subject: ${email.subject}`);
 
-            // Create session key from thread_id or subject
-            const sessionKey = `email-${email.thread_id || email.subject.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 50)}`;
+            // Security check - filter untrusted senders
+            if (!isTrustedSender(email.from)) {
+              log(`[EmailChannel] Untrusted sender: ${email.from} - blocking auto-reply`);
+              await forwardUntrustedEmail(email);
+              continue;
+            }
+
+            // Session key is based on thread_id for parallel thread processing
+            const sessionKey = `email-${email.thread_id}`;
 
             // Build recipient info
             const recipients: string[] = [];
@@ -336,5 +407,17 @@ ${email.body}`;
       threadId: thread_id,
       messageId: message_id,
     });
+  },
+
+  getSessionKey(payload: any): string {
+    // Use thread_id for parallel thread processing
+    return `email-${payload.thread_id}`;
+  },
+
+  getChannelContext(): string {
+    return `[Channel: Email]
+- Replies are sent automatically through the relay system - do NOT use send_email for replies
+- To send attachments with a reply, use mcp__gmail__send_email with the attachments parameter (array of file paths)
+- Each email thread runs independently - different threads can process in parallel`;
   },
 };

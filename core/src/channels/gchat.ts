@@ -521,4 +521,17 @@ export const GChatChannel: ChannelDefinition = {
     const verbosity = event.payload.verbosity || "streaming";
     return new GChatEventHandler(event.payload.space_name, event.payload.message_name, verbosity);
   },
+
+  getSessionKey(payload: any): string {
+    // Use space name for session key
+    return `gchat-${payload.space_name.replace(/\//g, "-")}`;
+  },
+
+  getChannelContext(): string {
+    return `[Channel: Google Chat]
+- To react to messages: Use mcp__google-chat__add_reaction with the message ID from this prompt
+- To remove reactions: Use mcp__google-chat__remove_reaction
+- To list messages: Use mcp__google-chat__list_messages with the space ID
+- File attachments are not currently supported in Google Chat`;
+  },
 };

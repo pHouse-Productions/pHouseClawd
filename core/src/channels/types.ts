@@ -39,4 +39,12 @@ export interface ChannelDefinition {
 
   // Create a handler for a specific event
   createHandler(event: ChannelEvent): ChannelEventHandler;
+
+  // Get the session key from the event payload
+  // Allows channels to define their own session key format (e.g., email uses threadId)
+  getSessionKey(payload: any): string;
+
+  // Get channel-specific context to inject into prompts
+  // Used to inform the LLM about available tools and how to use them
+  getChannelContext?(): string;
 }
