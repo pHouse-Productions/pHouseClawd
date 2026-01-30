@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { authFetch } from "@/lib/auth";
 
 interface McpServer {
@@ -18,23 +18,23 @@ interface McpData {
 
 export default function McpPage() {
   const [data, setData] = useState<McpData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [hasFetched, setHasFetched] = useState(false);
 
   const fetchData = () => {
     setLoading(true);
     setError(null);
     authFetch("/api/mcp")
       .then((res) => res.json())
-      .then((d) => setData(d))
+      .then((d) => {
+        setData(d);
+        setHasFetched(true);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   const toggleServer = async (name: string, currentStatus: string) => {
     const action = currentStatus === "disabled" ? "enable" : "disable";
@@ -113,6 +113,30 @@ export default function McpPage() {
     }
   };
 
+  // Initial state - haven't fetched yet
+  if (!hasFetched && !loading) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white">MCP Servers</h2>
+          <p className="text-zinc-500 mt-1">Model Context Protocol integrations</p>
+        </div>
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-8 text-center">
+          <p className="text-zinc-400 mb-4">Health check runs against all MCP servers and can take a moment.</p>
+          <button
+            onClick={fetchData}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-sm font-medium flex items-center gap-2 mx-auto"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Fetch Status
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -121,7 +145,7 @@ export default function McpPage() {
           <p className="text-zinc-500 mt-1">Model Context Protocol integrations</p>
         </div>
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-8 text-center">
-          <p className="text-zinc-500">Loading... (health check can take a moment)</p>
+          <p className="text-zinc-500">Checking server health... (this can take a moment)</p>
         </div>
       </div>
     );

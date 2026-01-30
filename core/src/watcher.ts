@@ -505,6 +505,7 @@ async function performRollup(): Promise<void> {
 
   const lines = shortTermContent.trim().split("\n");
   const totalLines = lines.length;
+  const bufferSizeKB = Math.round(shortTermContent.length / 1024);
 
   const rollupPrompt = `You need to perform a memory rollup. Here is the short-term memory buffer containing recent conversations:
 
@@ -520,7 +521,12 @@ Please:
 
 Be selective - not everything needs to be saved. Focus on information that would be useful to recall in future sessions.`;
 
+  // Create a job file so this shows in the dashboard
+  const jobId = generateJobId();
+
   return new Promise((resolve, reject) => {
+    log(`[Memory] Starting rollup job ${jobId} (buffer: ${bufferSizeKB}KB, ${totalLines} lines)`);
+
     const proc = spawn(
       "claude",
       [
@@ -537,23 +543,52 @@ Be selective - not everything needs to be saved. Focus on information that would
       }
     );
 
+    // Track in job system
+    createJobFile(jobId, "memory-rollup", `[Auto-Rollup] Buffer at ${bufferSizeKB}KB (${totalLines} lines)`, proc.pid, rollupPrompt);
+    runningJobs.set(jobId, proc);
+
     let stderr = "";
+    let lineBuffer = "";
+    let lastCost: number | undefined;
+    let lastDurationMs: number | undefined;
 
     proc.stdout.on("data", (data) => {
-      // Just consume stdout, we don't need to process it
+      const chunk = data.toString();
+      lineBuffer += chunk;
+
+      const outputLines = lineBuffer.split("\n");
+      lineBuffer = outputLines.pop() || "";
+
+      for (const line of outputLines) {
+        if (!line.trim()) continue;
+        try {
+          const streamEvent = JSON.parse(line);
+          appendJobEvent(jobId, streamEvent);
+
+          // Capture cost/duration from result events
+          if (streamEvent.type === "result") {
+            lastCost = streamEvent.total_cost_usd;
+            lastDurationMs = streamEvent.duration_ms;
+          }
+        } catch {}
+      }
     });
 
     proc.stderr.on("data", (data) => {
       stderr += data.toString();
     });
 
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
+      const wasKilled = signal === "SIGTERM" || signal === "SIGKILL";
+      const status = wasKilled ? "stopped" : (code === 0 ? "completed" : "error");
+      finalizeJob(jobId, status, lastCost, lastDurationMs);
+
       if (code === 0) {
         // Trim buffer to keep only the most recent 25%
         const linesToKeep = Math.ceil(totalLines * SHORT_TERM_RETAIN_RATIO);
         const retainedLines = lines.slice(-linesToKeep);
         fs.writeFileSync(SHORT_TERM_MEMORY_FILE, retainedLines.join("\n") + "\n");
-        log(`[Memory] Trimmed buffer from ${totalLines} to ${linesToKeep} lines (kept ${Math.round(SHORT_TERM_RETAIN_RATIO * 100)}%)`);
+        log(`[Memory] Rollup job ${jobId} completed. Trimmed buffer from ${totalLines} to ${linesToKeep} lines (kept ${Math.round(SHORT_TERM_RETAIN_RATIO * 100)}%)`);
         resolve();
       } else {
         reject(new Error(`Rollup process exited with code ${code}: ${stderr}`));
@@ -561,6 +596,7 @@ Be selective - not everything needs to be saved. Focus on information that would
     });
 
     proc.on("error", (err) => {
+      finalizeJob(jobId, "error");
       reject(err);
     });
   });
