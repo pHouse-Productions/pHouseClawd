@@ -260,6 +260,7 @@ export async function GET() {
           telegram: { enabled: false },
           email: { enabled: false },
           gchat: { enabled: false },
+          discord: { enabled: false },
         },
       },
       emailSecurity: emailSecurityConfig,
