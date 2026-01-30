@@ -11,13 +11,14 @@ const DASHBOARD_ENV_FILE = path.join(PROJECT_ROOT, "dashboard/.env.local");
 const CHANNELS_CONFIG = path.join(PROJECT_ROOT, "config/channels.json");
 const EMAIL_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/email-security.json");
 const GCHAT_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/gchat-security.json");
+const DISCORD_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/discord-security.json");
 const CLAUDE_MD_FILE = path.join(PROJECT_ROOT, "CLAUDE.md");
 
 // Config schema - keys exposed in UI
 export const CONFIG_SCHEMA = {
   telegram: {
     TELEGRAM_BOT_TOKEN: {
-      label: "Telegram Bot Token",
+      label: "Bot Token",
       description: "Token for your Telegram bot",
       howToGet: `1. Open Telegram and search for @BotFather
 2. Send /newbot and follow the prompts to create a bot
@@ -27,6 +28,22 @@ export const CONFIG_SCHEMA = {
 Note: You'll also need to message your bot once and get your Chat ID. Send any message to your bot, then visit:
 https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
 Look for "chat":{"id":XXXXXXXX} - that number is your Chat ID.`,
+      required: false,
+      sensitive: true,
+    },
+  },
+  discord: {
+    DISCORD_BOT_TOKEN: {
+      label: "Bot Token",
+      description: "Token for your Discord bot",
+      howToGet: `1. Go to discord.com/developers/applications
+2. Click "New Application" and give it a name
+3. Go to "Bot" in the left sidebar
+4. Click "Reset Token" to get your bot token
+5. Enable "Message Content Intent" under Privileged Gateway Intents
+6. Go to "OAuth2" > "URL Generator", select "bot" scope
+7. Select permissions: Send Messages, Read Message History, Add Reactions
+8. Use the generated URL to invite the bot to your server`,
       required: false,
       sensitive: true,
     },
@@ -141,7 +158,7 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
 export async function GET() {
   try {
     // Read all config sources
-    const [envVars, dashboardVars, googleToken, googleCredentials, channelsConfig, emailSecurityConfig, gchatSecurityConfig, claudeMd] = await Promise.all([
+    const [envVars, dashboardVars, googleToken, googleCredentials, channelsConfig, emailSecurityConfig, gchatSecurityConfig, discordSecurityConfig, claudeMd] = await Promise.all([
       parseEnvFile(MCP_ENV_FILE),
       parseEnvFile(DASHBOARD_ENV_FILE),
       readJsonFile(GOOGLE_TOKEN_FILE),
@@ -149,6 +166,7 @@ export async function GET() {
       readJsonFile(CHANNELS_CONFIG),
       readJsonFile(EMAIL_SECURITY_CONFIG),
       readJsonFile(GCHAT_SECURITY_CONFIG),
+      readJsonFile(DISCORD_SECURITY_CONFIG),
       fs.readFile(CLAUDE_MD_FILE, "utf-8").catch(() => ""),
     ]);
 
@@ -164,6 +182,12 @@ export async function GET() {
     const telegramVars: Record<string, string> = {};
     for (const [key, schema] of Object.entries(CONFIG_SCHEMA.telegram)) {
       telegramVars[key] = maskValue(envVars[key], schema.sensitive);
+    }
+
+    // Discord env vars
+    const discordVars: Record<string, string> = {};
+    for (const [key, schema] of Object.entries(CONFIG_SCHEMA.discord)) {
+      discordVars[key] = maskValue(envVars[key], schema.sensitive);
     }
 
     // Google env vars (just Places API key now)
@@ -218,6 +242,7 @@ export async function GET() {
     return NextResponse.json({
       schema: CONFIG_SCHEMA,
       telegram: telegramVars,
+      discord: discordVars,
       google: googleVars,
       ai: aiVars,
       dashboard: maskedDashboardVars,
@@ -239,6 +264,7 @@ export async function GET() {
       },
       emailSecurity: emailSecurityConfig,
       gchatSecurity: gchatSecurityConfig || { allowedSpaces: [], myUserId: "" },
+      discordSecurity: discordSecurityConfig || { allowedChannels: [], allowedGuilds: [], myUserId: null, userNames: {} },
       claudeMd: claudeMd,
     });
   } catch (error) {
@@ -333,6 +359,11 @@ export async function POST(request: NextRequest) {
       case "gchatSecurity": {
         await writeJsonFile(GCHAT_SECURITY_CONFIG, data);
         return NextResponse.json({ success: true, message: "Google Chat config updated. Restart required." });
+      }
+
+      case "discordSecurity": {
+        await writeJsonFile(DISCORD_SECURITY_CONFIG, data);
+        return NextResponse.json({ success: true, message: "Discord config updated. Restart required." });
       }
 
       case "claudeMd": {

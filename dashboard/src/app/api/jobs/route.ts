@@ -202,15 +202,17 @@ function buildJobFromFile(jobFile: JobFile, truncateContent: boolean): Job {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const limitParam = searchParams.get("limit");
+  const offsetParam = searchParams.get("offset");
   const jobIdParam = searchParams.get("job_id");
-  const limit = limitParam ? parseInt(limitParam, 10) : 50;
+  const limit = limitParam ? parseInt(limitParam, 10) : 20;
+  const offset = offsetParam ? parseInt(offsetParam, 10) : 0;
 
   try {
     // Ensure jobs directory exists
     try {
       await fs.access(JOBS_DIR);
     } catch {
-      return NextResponse.json({ jobs: [], total: 0 });
+      return NextResponse.json({ jobs: [], total: 0, hasMore: false });
     }
 
     // If requesting a specific job, return just that one with full details
@@ -223,13 +225,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ job });
     }
 
-    // List all job files
+    // List all job files with their modification times
     const files = await fs.readdir(JOBS_DIR);
     const jsonFiles = files.filter(f => f.endsWith(".json"));
 
-    // Read all job files and build job list
+    // Get file stats to sort by mtime (faster than reading/parsing each file)
+    const fileStats = await Promise.all(
+      jsonFiles.map(async (file) => {
+        const filePath = path.join(JOBS_DIR, file);
+        const stat = await fs.stat(filePath);
+        return { file, mtime: stat.mtime.getTime() };
+      })
+    );
+
+    // Sort by modification time descending (newest first)
+    fileStats.sort((a, b) => b.mtime - a.mtime);
+
+    const total = fileStats.length;
+
+    // Only read the files we need for this page
+    const pageFiles = fileStats.slice(offset, offset + limit);
+
     const jobs: Job[] = [];
-    for (const file of jsonFiles) {
+    for (const { file } of pageFiles) {
       const jobFile = await readJobFile(path.join(JOBS_DIR, file));
       if (jobFile) {
         const job = buildJobFromFile(jobFile, true); // truncated for list
@@ -237,11 +255,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Sort by start time descending (newest first) and limit
+    // Sort jobs by startTime in case mtime differs from startTime
     jobs.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
-    const limitedJobs = jobs.slice(0, limit);
 
-    return NextResponse.json({ jobs: limitedJobs, total: jobs.length });
+    return NextResponse.json({
+      jobs,
+      total,
+      hasMore: offset + limit < total,
+      offset,
+      limit
+    });
   } catch (err) {
     return NextResponse.json({ error: "Failed to read jobs", details: String(err) }, { status: 500 });
   }

@@ -610,19 +610,6 @@ export default function ConfigPage() {
         ))}
       </ConfigSection>
 
-      {/* Telegram Settings */}
-      <ConfigSection title="Telegram">
-        {Object.entries(config.schema.telegram).map(([key, schema]) => (
-          <EnvVarInput
-            key={key}
-            name={key}
-            schema={schema}
-            value={config.telegram[key] || ""}
-            onSave={(value) => saveEnvVar("env", key, value)}
-          />
-        ))}
-      </ConfigSection>
-
       {/* Google OAuth Credentials */}
       <ConfigSection title="Google OAuth Credentials">
         <GoogleCredentialsEditor

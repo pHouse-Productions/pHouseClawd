@@ -11,6 +11,7 @@ interface SessionData {
   modes: Record<string, string>; // "session" | "transcript"
   queueModes: Record<string, string>; // "queue" | "interrupt"
   transcriptLines: Record<string, number>;
+  responseStyles: Record<string, string>; // "streaming" | "bundled" | "final"
 }
 
 async function loadSessionData(): Promise<SessionData> {
@@ -18,16 +19,17 @@ async function loadSessionData(): Promise<SessionData> {
     const content = await fs.readFile(SESSIONS_FILE, "utf-8");
     const data = JSON.parse(content);
     if (Array.isArray(data)) {
-      return { known: data, generations: {}, modes: {}, queueModes: {}, transcriptLines: {} };
+      return { known: data, generations: {}, modes: {}, queueModes: {}, transcriptLines: {}, responseStyles: {} };
     }
     return {
       ...data,
       modes: data.modes || {},
       queueModes: data.queueModes || {},
       transcriptLines: data.transcriptLines || {},
+      responseStyles: data.responseStyles || {},
     };
   } catch {
-    return { known: [], generations: {}, modes: {}, queueModes: {}, transcriptLines: {} };
+    return { known: [], generations: {}, modes: {}, queueModes: {}, transcriptLines: {}, responseStyles: {} };
   }
 }
 
@@ -44,6 +46,7 @@ export async function GET() {
       modes: data.modes,
       queueModes: data.queueModes,
       transcriptLines: data.transcriptLines,
+      responseStyles: data.responseStyles,
     });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
@@ -84,6 +87,15 @@ export async function POST(request: NextRequest) {
         data.transcriptLines[channel] = lines;
         await saveSessionData(data);
         return NextResponse.json({ success: true, message: `Transcript lines set to ${lines} for ${channel}` });
+      }
+
+      case "responseStyle": {
+        if (value === "streaming" || value === "bundled" || value === "final") {
+          data.responseStyles[channel] = value;
+          await saveSessionData(data);
+          return NextResponse.json({ success: true, message: `Response style set to ${value} for ${channel}` });
+        }
+        return NextResponse.json({ error: "Invalid response style" }, { status: 400 });
       }
 
       default:

@@ -14,6 +14,7 @@ import {
 import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
 import { GChatChannel } from "./channels/gchat.js";
+import { DiscordChannel } from "./channels/discord.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -88,6 +89,7 @@ function loadChannelsConfig(): ChannelsConfig {
       telegram: { enabled: true },
       email: { enabled: true },
       gchat: { enabled: true },
+      discord: { enabled: false },
     }
   };
 }
@@ -119,6 +121,7 @@ if (!fs.existsSync(LOGS_DIR)) {
 // Session management
 type MemoryMode = "session" | "transcript";
 type QueueMode = "queue" | "interrupt";
+type ResponseStyle = "streaming" | "bundled" | "final";
 
 interface SessionData {
   known: string[];
@@ -126,6 +129,7 @@ interface SessionData {
   modes: Record<string, MemoryMode>; // Per-channel memory mode (session vs transcript)
   queueModes: Record<string, QueueMode>; // Per-channel queue mode (queue vs interrupt)
   transcriptLines: Record<string, number>; // Per-channel transcript context lines
+  responseStyles: Record<string, ResponseStyle>; // Per-channel response style (streaming, bundled, final)
 }
 
 function loadSessionData(): SessionData {
@@ -133,17 +137,23 @@ function loadSessionData(): SessionData {
     if (fs.existsSync(SESSIONS_FILE)) {
       const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf-8"));
       if (Array.isArray(data)) {
-        return { known: data, generations: {}, modes: {}, queueModes: {}, transcriptLines: {} };
+        return { known: data, generations: {}, modes: {}, queueModes: {}, transcriptLines: {}, responseStyles: {} };
       }
-      return { ...data, modes: data.modes || {}, queueModes: data.queueModes || {}, transcriptLines: data.transcriptLines || {} };
+      return {
+        ...data,
+        modes: data.modes || {},
+        queueModes: data.queueModes || {},
+        transcriptLines: data.transcriptLines || {},
+        responseStyles: data.responseStyles || {},
+      };
     }
   } catch {}
-  return { known: [], generations: {}, modes: {}, queueModes: {}, transcriptLines: {} };
+  return { known: [], generations: {}, modes: {}, queueModes: {}, transcriptLines: {}, responseStyles: {} };
 }
 
 // Get base channel name for settings fallback (e.g., "email-abc123" -> "email")
 function getBaseChannelName(sessionKey: string): string | null {
-  const match = sessionKey.match(/^(telegram|email|gchat)-/);
+  const match = sessionKey.match(/^(telegram|email|gchat|discord)-/);
   return match ? match[1] : null;
 }
 
@@ -203,6 +213,37 @@ function getTranscriptLines(sessionKey: string): number {
 function setTranscriptLines(sessionKey: string, lines: number): void {
   const data = loadSessionData();
   data.transcriptLines[sessionKey] = lines;
+  saveSessionData(data);
+}
+
+// Default response styles per channel type
+const DEFAULT_RESPONSE_STYLES: Record<string, ResponseStyle> = {
+  telegram: "streaming",
+  gchat: "streaming",
+  discord: "streaming",
+  email: "final",
+};
+
+function getResponseStyle(sessionKey: string): ResponseStyle {
+  const data = loadSessionData();
+  // Try exact key first, then fall back to base channel
+  if (data.responseStyles[sessionKey]) {
+    return data.responseStyles[sessionKey];
+  }
+  const baseChannel = getBaseChannelName(sessionKey);
+  if (baseChannel && data.responseStyles[baseChannel]) {
+    return data.responseStyles[baseChannel];
+  }
+  // Return channel-specific default
+  if (baseChannel && DEFAULT_RESPONSE_STYLES[baseChannel]) {
+    return DEFAULT_RESPONSE_STYLES[baseChannel];
+  }
+  return "streaming"; // Fallback default
+}
+
+function setResponseStyle(sessionKey: string, style: ResponseStyle): void {
+  const data = loadSessionData();
+  data.responseStyles[sessionKey] = style;
   saveSessionData(data);
 }
 
@@ -690,6 +731,9 @@ async function handleChannelEvent(
   } else if (channel.name === "gchat") {
     const from = payload.sender_name || "Unknown";
     incomingContent = `${from}: ${payload.text}`;
+  } else if (channel.name === "discord") {
+    const from = payload.from || "Unknown";
+    incomingContent = `${from}: ${payload.text}`;
   }
 
   if (incomingContent) {
@@ -697,7 +741,7 @@ async function handleChannelEvent(
   }
 
   // Handle special commands for interactive channels (telegram, gchat)
-  if ((channel.name === "telegram" || channel.name === "gchat") && payload.type === "message") {
+  if ((channel.name === "telegram" || channel.name === "gchat" || channel.name === "discord") && payload.type === "message") {
     const text = payload.text?.trim().toLowerCase();
 
     // Helper to send a quick response via synthesized stream event
@@ -827,6 +871,11 @@ async function handleChannelEvent(
   if (channelContext) {
     finalPrompt = finalPrompt + `\n\n${channelContext}`;
   }
+
+  // Inject response style from session settings into event payload
+  // This overrides any hardcoded verbosity in the channel
+  const responseStyle = getResponseStyle(sessionKey);
+  event.payload.verbosity = responseStyle;
 
   // Create handler for this event
   const handler = channel.createHandler(event);
@@ -990,7 +1039,7 @@ async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Pr
 
   // PRIORITY: Handle /stop command immediately, before queueing
   // This ensures stop commands can interrupt running jobs
-  if ((channel.name === "telegram" || channel.name === "gchat") && payload.type === "message") {
+  if ((channel.name === "telegram" || channel.name === "gchat" || channel.name === "discord") && payload.type === "message") {
     const text = payload.text?.trim().toLowerCase();
     if (text === "/stop" || text?.startsWith("/stop ")) {
       log(`[Watcher] Processing /stop command with priority (bypassing queue)`);
@@ -1423,6 +1472,7 @@ async function watch(): Promise<void> {
     TelegramChannel,
     EmailChannel,
     GChatChannel,
+    DiscordChannel,
   ];
 
   // Filter to only enabled channels

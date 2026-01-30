@@ -67,11 +67,16 @@ function ChannelBadge({ channel }: { channel: string }) {
   );
 }
 
+const PAGE_SIZE = 10;
+
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [stoppingJobs, setStoppingJobs] = useState<Set<string>>(new Set());
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
 
   const stopJob = async (jobId: string, e: React.MouseEvent) => {
     e.preventDefault(); // Don't navigate to job detail
@@ -102,11 +107,23 @@ export default function JobsPage() {
     }
   };
 
-  const fetchJobs = useCallback(async () => {
+  const fetchJobs = useCallback(async (reset = true) => {
     try {
-      const res = await authFetch("/api/jobs?limit=50");
+      const offset = reset ? 0 : jobs.length;
+      if (!reset) setLoadingMore(true);
+
+      const res = await authFetch(`/api/jobs?limit=${PAGE_SIZE}&offset=${offset}`);
       const data = await res.json();
-      setJobs(data.jobs || []);
+
+      if (reset) {
+        setJobs(data.jobs || []);
+      } else {
+        setJobs(prev => [...prev, ...(data.jobs || [])]);
+      }
+
+      setTotal(data.total || 0);
+      setHasMore(data.hasMore || false);
+
       // Auto-enable refresh if any jobs are running
       const hasRunning = (data.jobs || []).some((j: Job) => j.status === "running");
       if (hasRunning && !autoRefresh) {
@@ -116,8 +133,9 @@ export default function JobsPage() {
       console.error("Failed to fetch jobs:", err);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, [autoRefresh]);
+  }, [autoRefresh, jobs.length]);
 
   useEffect(() => {
     fetchJobs();
@@ -213,6 +231,9 @@ export default function JobsPage() {
         </div>
       ) : (
         <div className="space-y-2">
+          <div className="text-xs text-zinc-500 text-right">
+            Showing {jobs.length} of {total} jobs
+          </div>
           {jobs.map((job) => (
             <Link
               key={job.id}
@@ -252,6 +273,17 @@ export default function JobsPage() {
               </div>
             </Link>
           ))}
+
+          {/* Load More Button */}
+          {hasMore && (
+            <button
+              onClick={() => fetchJobs(false)}
+              disabled={loadingMore}
+              className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {loadingMore ? "Loading..." : `Load More (${total - jobs.length} remaining)`}
+            </button>
+          )}
         </div>
       )}
     </div>
