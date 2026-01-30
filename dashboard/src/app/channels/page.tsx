@@ -359,7 +359,13 @@ function BotTokenInput({
   const [saving, setSaving] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
-  const isConfigured = currentValue && currentValue !== "";
+  // Check if value is actually configured (not empty and not a placeholder pattern)
+  const isPlaceholder = currentValue && (
+    currentValue.includes("your_") ||
+    currentValue.includes("...here") ||
+    currentValue.startsWith("your_")
+  );
+  const isConfigured = currentValue && currentValue !== "" && !isPlaceholder;
 
   const handleSave = async () => {
     setSaving(true);
@@ -1103,10 +1109,16 @@ export default function ChannelsPage() {
     }
   };
 
+  // Check if a value is a placeholder (not a real configured value)
+  const isPlaceholderValue = (value: string | undefined) => {
+    if (!value) return true;
+    return value.includes("your_") || value.includes("...here") || value.startsWith("your_");
+  };
+
   const canEnableChannel = (channel: string) => {
     const googleAuthConfigured = config?.googleToken.status === "configured";
-    const telegramConfigured = config?.telegram.TELEGRAM_BOT_TOKEN && config.telegram.TELEGRAM_BOT_TOKEN !== "";
-    const discordConfigured = config?.discord?.DISCORD_BOT_TOKEN && config.discord.DISCORD_BOT_TOKEN !== "";
+    const telegramConfigured = config?.telegram.TELEGRAM_BOT_TOKEN && !isPlaceholderValue(config.telegram.TELEGRAM_BOT_TOKEN);
+    const discordConfigured = config?.discord?.DISCORD_BOT_TOKEN && !isPlaceholderValue(config.discord.DISCORD_BOT_TOKEN);
 
     if (channel === "email" || channel === "gchat") {
       if (!googleAuthConfigured) {
