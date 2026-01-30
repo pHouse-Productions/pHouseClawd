@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as https from "https";
 import { fileURLToPath } from "url";
 import type { ChannelDefinition, ChannelEvent, ChannelEventHandler, StreamEvent } from "./types.js";
+import { OutputHandler, type Verbosity } from "./output-handler.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +13,8 @@ const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 
 const SEND_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/send.ts");
 const TYPING_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/typing.ts");
+const ADD_REACTION_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/add-reaction.ts");
+const REMOVE_REACTION_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/remove-reaction.ts");
 const HISTORY_SCRIPT = path.join(PROJECT_ROOT, "listeners/telegram/history.js");
 const LOGS_DIR = path.join(PROJECT_ROOT, "logs");
 const LOG_FILE = path.join(LOGS_DIR, "watcher.log");
@@ -56,141 +59,38 @@ async function downloadFile(bot: Telegraf, fileId: string, destPath: string): Pr
   });
 }
 
-// Verbosity levels
-type Verbosity = "streaming" | "progress" | "final";
-
-const FLUSH_INTERVAL_MS = 2000;
-const MIN_CHARS_TO_FLUSH = 50;
-
 // Handler for a single Telegram event
 class TelegramEventHandler implements ChannelEventHandler {
   private chatId: number;
-  private verbosity: Verbosity;
-  private textBuffer: string = "";
-  private lastFlush: number = Date.now();
-  private flushTimer: NodeJS.Timeout | null = null;
-  private typingInterval: NodeJS.Timeout | null = null;
-  private isComplete: boolean = false;
-  private restartTypingTimer: NodeJS.Timeout | null = null;
+  private messageId: number | null;
+  private outputHandler: OutputHandler;
+  private hasAddedReaction = false;
 
-  constructor(chatId: number, verbosity: Verbosity = "streaming") {
+  constructor(chatId: number, messageId: number | null, verbosity: Verbosity = "streaming") {
     this.chatId = chatId;
-    this.verbosity = verbosity;
-    this.startTyping();
+    this.messageId = messageId;
+
+    this.outputHandler = new OutputHandler(
+      { verbosity },
+      {
+        onSend: (message) => this.sendMessage(message),
+        // Telegram has both typing indicator AND reactions - we use both like Discord
+        onWorkStarted: () => {
+          this.sendTypingIndicator();
+          this.addWorkingReaction();
+        },
+        onWorkComplete: () => this.removeWorkingReaction(),
+      }
+    );
   }
 
   onStreamEvent(event: StreamEvent): void {
-    // Check for result event - this means Claude is done
-    if (event.type === "result") {
-      this.onComplete(event.subtype === "success" ? 0 : 1);
-      return;
-    }
-
-    const { text, progress } = this.extractRelayInfo(event);
-
-    if (text) {
-      if (this.verbosity === "streaming") {
-        this.bufferText(text);
-      } else if (this.verbosity === "final") {
-        this.textBuffer += text;
-      }
-    }
-
-    if (this.verbosity === "progress" && progress) {
-      this.sendMessage(progress);
-    }
+    this.outputHandler.onStreamEvent(event);
   }
 
   onComplete(code: number): void {
-    if (this.isComplete) return;
-    this.isComplete = true;
-
-    if (this.restartTypingTimer) {
-      clearTimeout(this.restartTypingTimer);
-      this.restartTypingTimer = null;
-    }
-
-    this.stopTyping();
-
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
-
-    if (this.textBuffer.trim()) {
-      this.sendMessage(this.textBuffer.trim());
-      this.textBuffer = "";
-    }
-
+    this.outputHandler.onComplete(code);
     log(`[TelegramChannel] Complete for chat ${this.chatId}, code ${code}`);
-  }
-
-  private extractRelayInfo(event: StreamEvent): { text: string | null; progress: string | null } {
-    const result: { text: string | null; progress: string | null } = { text: null, progress: null };
-
-    switch (event.type) {
-      case "assistant":
-        if (event.message?.content) {
-          const text = event.message.content
-            .filter((c: any) => c.type === "text")
-            .map((c: any) => c.text)
-            .join("");
-          if (text) result.text = text;
-        }
-        break;
-
-      case "content_block_start":
-        if (event.content_block?.type === "tool_use") {
-          result.progress = `Using ${event.content_block.name}...`;
-        }
-        break;
-
-      case "content_block_delta":
-        if (event.delta?.type === "text_delta") {
-          result.text = event.delta.text;
-        }
-        break;
-
-      case "error":
-        result.progress = `Error: ${event.error?.message || "Unknown error"}`;
-        break;
-    }
-
-    return result;
-  }
-
-  private bufferText(text: string): void {
-    this.textBuffer += text;
-
-    const timeSinceFlush = Date.now() - this.lastFlush;
-    if (this.textBuffer.length >= MIN_CHARS_TO_FLUSH || timeSinceFlush > FLUSH_INTERVAL_MS) {
-      this.flush();
-    } else if (!this.flushTimer) {
-      this.flushTimer = setTimeout(() => this.flush(), FLUSH_INTERVAL_MS);
-    }
-  }
-
-  private flush(): void {
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
-
-    const text = this.textBuffer.trim();
-    if (text) {
-      this.stopTyping();
-      this.sendMessage(text);
-      this.textBuffer = "";
-      this.lastFlush = Date.now();
-
-      if (!this.isComplete) {
-        this.restartTypingTimer = setTimeout(() => {
-          if (!this.isComplete) {
-            this.startTyping();
-          }
-        }, 500);
-      }
-    }
   }
 
   private sendMessage(message: string): void {
@@ -222,16 +122,37 @@ class TelegramEventHandler implements ChannelEventHandler {
     }
   }
 
-  private startTyping(): void {
-    if (this.typingInterval) return;
-    this.sendTypingIndicator();
-    this.typingInterval = setInterval(() => this.sendTypingIndicator(), 4000);
+  private addWorkingReaction(): void {
+    // Only add reaction once, and only if we have a message ID
+    if (this.hasAddedReaction || !this.messageId) return;
+
+    try {
+      const proc = spawn("npx", ["tsx", ADD_REACTION_SCRIPT, String(this.chatId), String(this.messageId), "👀"], {
+        cwd: PROJECT_ROOT,
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+      });
+      proc.unref();
+      this.hasAddedReaction = true;
+      log(`[TelegramChannel] Added working reaction to ${this.messageId}`);
+    } catch (err) {
+      log(`[TelegramChannel] Failed to add reaction: ${err}`);
+    }
   }
 
-  private stopTyping(): void {
-    if (this.typingInterval) {
-      clearInterval(this.typingInterval);
-      this.typingInterval = null;
+  private removeWorkingReaction(): void {
+    if (!this.hasAddedReaction || !this.messageId) return;
+
+    try {
+      const proc = spawn("npx", ["tsx", REMOVE_REACTION_SCRIPT, String(this.chatId), String(this.messageId)], {
+        cwd: PROJECT_ROOT,
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+      });
+      proc.unref();
+      log(`[TelegramChannel] Removed working reaction from ${this.messageId}`);
+    } catch (err) {
+      log(`[TelegramChannel] Failed to remove reaction: ${err}`);
     }
   }
 }
@@ -256,6 +177,7 @@ export const TelegramChannel: ChannelDefinition = {
       // Handle text messages
       if ("text" in ctx.message) {
         const text = ctx.message.text;
+        const messageId = ctx.message.message_id;
 
         saveMessage(chatId, {
           role: "user",
@@ -270,6 +192,7 @@ export const TelegramChannel: ChannelDefinition = {
           payload: {
             type: "message",
             chat_id: chatId,
+            message_id: messageId,
             from,
             text,
             verbosity: "streaming" as Verbosity,
@@ -284,6 +207,7 @@ export const TelegramChannel: ChannelDefinition = {
         const photo = ctx.message.photo;
         const largestPhoto = photo[photo.length - 1];
         const caption = ctx.message.caption || "";
+        const messageId = ctx.message.message_id;
         const timestamp = Date.now();
         const filename = `${chatId}_${timestamp}.jpg`;
         const imagePath = path.join(FILES_DIR, filename);
@@ -308,6 +232,7 @@ export const TelegramChannel: ChannelDefinition = {
             payload: {
               type: "photo",
               chat_id: chatId,
+              message_id: messageId,
               from,
               caption,
               image_path: imagePath,
@@ -325,6 +250,7 @@ export const TelegramChannel: ChannelDefinition = {
       if ("document" in ctx.message) {
         const doc = ctx.message.document;
         const caption = ctx.message.caption || "";
+        const messageId = ctx.message.message_id;
         const timestamp = Date.now();
         const originalName = doc.file_name || "document";
         const filename = `${chatId}_${timestamp}_${originalName}`;
@@ -350,6 +276,7 @@ export const TelegramChannel: ChannelDefinition = {
             payload: {
               type: "document",
               chat_id: chatId,
+              message_id: messageId,
               from,
               caption,
               file_path: filePath,
@@ -382,7 +309,8 @@ export const TelegramChannel: ChannelDefinition = {
 
   createHandler(event: ChannelEvent): ChannelEventHandler {
     const verbosity = event.payload.verbosity || "streaming";
-    return new TelegramEventHandler(event.payload.chat_id, verbosity);
+    const messageId = event.payload.message_id || null;
+    return new TelegramEventHandler(event.payload.chat_id, messageId, verbosity);
   },
 
   getSessionKey(payload: any): string {

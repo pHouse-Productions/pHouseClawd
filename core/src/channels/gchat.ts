@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import type { ChannelDefinition, ChannelEvent, ChannelEventHandler, StreamEvent } from "./types.js";
+import { OutputHandler, type Verbosity } from "./output-handler.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -164,34 +165,32 @@ async function getMyEmail(auth: any): Promise<string | null> {
   }
 }
 
-// Verbosity levels
-type Verbosity = "streaming" | "progress" | "final";
-
-const FLUSH_INTERVAL_MS = 2000;
-const MIN_CHARS_TO_FLUSH = 50;
-
 // Handler for a single GChat event
 class GChatEventHandler implements ChannelEventHandler {
   private spaceName: string;
   private messageName: string;
-  private verbosity: Verbosity;
-  private textBuffer: string = "";
-  private lastFlush: number = Date.now();
-  private flushTimer: NodeJS.Timeout | null = null;
-  private isComplete: boolean = false;
+  private outputHandler: OutputHandler;
   private reactionName: string | null = null;
 
   constructor(spaceName: string, messageName: string, verbosity: Verbosity = "streaming") {
     this.spaceName = spaceName;
     this.messageName = messageName;
-    this.verbosity = verbosity;
 
-    // Add eyes reaction to show we're working on it
-    this.addWorkingReaction();
+    this.outputHandler = new OutputHandler(
+      { verbosity },
+      {
+        onSend: (message) => this.sendMessage(message),
+        // GChat uses emoji reactions as a working indicator (no typing API)
+        // onWorkStarted adds 👀 reaction - only needs to be called once
+        onWorkStarted: () => this.addWorkingReaction(),
+        onWorkComplete: () => this.removeWorkingReaction(),
+      }
+    );
   }
 
   private async addWorkingReaction(): Promise<void> {
-    if (!this.messageName) return;
+    // Only add reaction once
+    if (this.reactionName || !this.messageName) return;
 
     try {
       const auth = getOAuth2Client();
@@ -219,109 +218,19 @@ class GChatEventHandler implements ChannelEventHandler {
         name: this.reactionName,
       });
       log(`[GChatChannel] Removed working reaction from ${this.messageName}`);
+      this.reactionName = null;
     } catch (err) {
       log(`[GChatChannel] Failed to remove working reaction: ${err}`);
     }
   }
 
   onStreamEvent(event: StreamEvent): void {
-    if (event.type === "result") {
-      this.onComplete(event.subtype === "success" ? 0 : 1);
-      return;
-    }
-
-    const { text, progress } = this.extractRelayInfo(event);
-
-    if (text) {
-      if (this.verbosity === "streaming") {
-        this.bufferText(text);
-      } else if (this.verbosity === "final") {
-        this.textBuffer += text;
-      }
-    }
-
-    if (this.verbosity === "progress" && progress) {
-      this.sendMessage(progress);
-    }
+    this.outputHandler.onStreamEvent(event);
   }
 
   onComplete(code: number): void {
-    if (this.isComplete) return;
-    this.isComplete = true;
-
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
-
-    if (this.textBuffer.trim()) {
-      this.sendMessage(this.textBuffer.trim());
-      this.textBuffer = "";
-    }
-
-    // Remove the working reaction
-    this.removeWorkingReaction();
-
+    this.outputHandler.onComplete(code);
     log(`[GChatChannel] Complete for space ${this.spaceName}, code ${code}`);
-  }
-
-  private extractRelayInfo(event: StreamEvent): { text: string | null; progress: string | null } {
-    const result: { text: string | null; progress: string | null } = { text: null, progress: null };
-
-    switch (event.type) {
-      case "assistant":
-        if (event.message?.content) {
-          const text = event.message.content
-            .filter((c: any) => c.type === "text")
-            .map((c: any) => c.text)
-            .join("");
-          if (text) result.text = text;
-        }
-        break;
-
-      case "content_block_start":
-        if (event.content_block?.type === "tool_use") {
-          result.progress = `Using ${event.content_block.name}...`;
-        }
-        break;
-
-      case "content_block_delta":
-        if (event.delta?.type === "text_delta") {
-          result.text = event.delta.text;
-        }
-        break;
-
-      case "error":
-        result.progress = `Error: ${event.error?.message || "Unknown error"}`;
-        break;
-    }
-
-    return result;
-  }
-
-  private bufferText(text: string): void {
-    this.textBuffer += text;
-
-    const timeSinceFlush = Date.now() - this.lastFlush;
-    if (this.textBuffer.length >= MIN_CHARS_TO_FLUSH || timeSinceFlush > FLUSH_INTERVAL_MS) {
-      this.flush();
-    } else if (!this.flushTimer) {
-      this.flushTimer = setTimeout(() => this.flush(), FLUSH_INTERVAL_MS);
-    }
-  }
-
-  private flush(): void {
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
-
-    const text = this.textBuffer.trim();
-    if (text) {
-      this.sendMessage(text);
-      this.textBuffer = "";
-      this.lastFlush = Date.now();
-    }
   }
 
   private sendMessage(message: string): void {

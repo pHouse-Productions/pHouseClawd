@@ -1,0 +1,8 @@
+{
+  "name": "discord-listener",
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "discord.js": "^14.25.1"
+  }
+}
