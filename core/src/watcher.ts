@@ -554,13 +554,30 @@ async function performRollup(): Promise<void> {
 ${shortTermContent}
 ---
 
-Please:
-1. Review the conversations above
-2. Extract important information worth remembering long-term (decisions made, learnings, project updates, personal info, preferences, etc.)
-3. Use the 'remember' tool to save important memories to appropriate files in long-term memory (e.g., journal.md for activity log, projects.md for project updates, etc.)
-4. Do NOT call the rollup tool with clear=true - the watcher will handle trimming the buffer.
+CRITICAL: This is a CONSOLIDATION task, not an append task. You must:
 
-Be selective - not everything needs to be saved. Focus on information that would be useful to recall in future sessions.`;
+1. First use 'recall' (no args) to see all existing long-term memory files
+2. For each relevant file (journal.md, projects.md, etc.), use 'recall' to read its CURRENT content
+3. Identify NEW information from the buffer that isn't already captured
+4. REWRITE each file with the updated/consolidated content using 'remember' with mode='replace'
+
+RULES:
+- DO NOT just append to files - that creates redundancy
+- MERGE new info into existing sections where relevant
+- REMOVE redundant/duplicate information
+- Keep files well-organized with clear sections
+- For journal.md: Summarize older entries, keep recent ones detailed
+- For projects.md: Update status, don't duplicate what's already there
+- Be VERY selective - only save info useful for future recall
+
+Example workflow:
+1. recall() → see files exist
+2. recall(file="journal.md") → read current content
+3. Identify what's NEW in the buffer vs what's already in journal.md
+4. remember(file="journal.md", content="[consolidated content]", mode="replace")
+5. Repeat for other files as needed
+
+Do NOT call any tools to trim or clear the buffer - the watcher handles that.`;
 
   // Create a job file so this shows in the dashboard
   const jobId = generateJobId();
