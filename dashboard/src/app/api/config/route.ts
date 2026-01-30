@@ -255,14 +255,29 @@ export async function GET() {
         expiry: googleTokenExpiry,
         raw: googleToken ? JSON.stringify(googleToken, null, 2) : "",
       },
-      channels: channelsConfig || {
-        channels: {
-          telegram: { enabled: false },
-          email: { enabled: false },
-          gchat: { enabled: false },
-          discord: { enabled: false },
-        },
-      },
+      channels: (() => {
+        // Default channels structure
+        const defaults = {
+          channels: {
+            telegram: { enabled: false },
+            email: { enabled: false },
+            gchat: { enabled: false },
+            discord: { enabled: false },
+          },
+        };
+
+        // If no config file, return defaults
+        if (!channelsConfig) return defaults;
+
+        // Merge existing config with defaults (fill in missing channels)
+        const existing = channelsConfig as { channels?: Record<string, unknown> };
+        return {
+          channels: {
+            ...defaults.channels,
+            ...(existing.channels || {}),
+          },
+        };
+      })(),
       emailSecurity: emailSecurityConfig,
       gchatSecurity: gchatSecurityConfig || { allowedSpaces: [], myUserId: "" },
       discordSecurity: discordSecurityConfig || { allowedChannels: [], allowedGuilds: [], myUserId: null, userNames: {} },
