@@ -7,10 +7,12 @@ A personal AI assistant framework built on Claude Code. Create your own AI assis
 - **Telegram Bot** - Chat with your assistant from anywhere
 - **Gmail Integration** - Read and send emails through your assistant
 - **Google Chat Integration** - Chat via Google Chat (requires setup)
+- **Discord Bot** - Chat via Discord server
 - **Image Generation** - Generate and edit images using Gemini
 - **Scheduled Tasks** - Cron jobs for recurring tasks (daily briefings, reminders, etc.)
 - **Web Browsing** - Playwright-powered web automation
 - **Persistent Memory** - Your assistant remembers context across sessions
+- **Stock Data** - Real-time quotes and company news via Finnhub
 
 ## Important: Dedicated Machine Required
 
@@ -122,22 +124,31 @@ After initial setup, use the **dashboard** to:
 pHouseClawd/
 ├── CLAUDE.md              # Your assistant's personality and instructions
 ├── config/
+│   ├── channels.json      # Enabled/disabled channels
 │   ├── cron.json          # Scheduled tasks
 │   ├── email-security.json # Email security settings
-│   └── gchat-security.json # Google Chat security settings
+│   ├── gchat-security.json # Google Chat security settings
+│   └── discord-security.json # Discord security settings
 ├── core/
 │   └── src/
 │       ├── watcher.ts     # Main event processor
-│       └── events.ts      # Event queue system
+│       ├── events.ts      # Event queue system
+│       └── channels/      # Channel handlers (telegram, email, gchat, discord)
 ├── listeners/
 │   ├── telegram/          # Telegram message listener daemon
 │   ├── gmail/             # Gmail inbox watcher daemon
-│   └── gchat/             # Google Chat listener
+│   ├── gchat/             # Google Chat listener
+│   └── discord/           # Discord bot listener
 ├── dashboard/             # Web UI (Next.js)
 ├── memory/
-│   ├── short-term/        # Conversation buffer (auto-logged, gitignored)
-│   └── long-term/         # Persistent memories (gitignored)
+│   ├── short-term/        # Global conversation buffer (auto-logged, gitignored)
+│   ├── long-term/         # Persistent memories (gitignored)
+│   ├── telegram/          # Telegram-specific context
+│   ├── discord/           # Discord-specific context
+│   ├── email/             # Email-specific context
+│   └── gchat/             # GChat-specific context
 ├── leads/                 # Business leads tracker (gitignored)
+├── websites/              # Generated client websites
 └── logs/                  # Application logs (gitignored)
 ```
 
@@ -195,7 +206,7 @@ git clone https://github.com/pHouse-Productions/pHouseMcp.git
 
    **Note:** We use `node dist/mcp.js` (compiled JavaScript) instead of `npx tsx src/mcp.ts` for faster MCP startup times.
 
-   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `google-calendar`, `google-chat`, `image-gen`, `yahoo-finance`, `cron`, `memory`, `pdf`
+   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `google-calendar`, `google-chat`, `discord`, `image-gen`, `finnhub`, `cron`, `memory`, `pdf`
 
 ### Recommended Third-Party MCP
 
@@ -406,8 +417,10 @@ Your assistant comes with a web dashboard at `http://localhost:3000` (or your se
 **Features:**
 - **Home** - System status and quick actions
 - **Jobs** - View running and completed tasks
+- **Channels** - Monitor active communication channels
 - **Cron** - Manage scheduled tasks
 - **Memory** - View short-term and long-term memory
+- **MCP** - View available MCP servers and tools
 - **Logs** - Application logs for debugging
 - **Skills** - Available slash commands
 - **Config** - All API keys, OAuth, and settings
@@ -426,7 +439,7 @@ cd core && npm install && cd ..  # Install any new dependencies
 **pHouseMcp:**
 ```bash
 cd pHouseMcp
-git pull origin master
+git pull origin main
 npm install    # Install any new dependencies
 npm run build  # Rebuild after pulling updates!
 ```

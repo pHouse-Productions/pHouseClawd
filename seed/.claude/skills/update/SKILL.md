@@ -26,7 +26,7 @@ The main assistant framework with the watcher, dashboard, and configuration.
 ### Step 1: Update pHouseMcp
 
 ```bash
-cd /home/ubuntu/pHouseMcp && git fetch origin && git pull origin master
+cd /home/ubuntu/pHouseMcp && git fetch origin && git pull origin main
 ```
 
 Check what changed:

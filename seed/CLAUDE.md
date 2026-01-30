@@ -69,18 +69,24 @@ Your text output is automatically sent to the appropriate channel. Just write no
 
 ```
 pHouseClawd/
-├── core/              # Watcher service
+├── core/              # Watcher service + channel handlers
 ├── dashboard/         # Web UI for configuration
-├── listeners/         # Channel-specific listeners
-├── skills/            # Custom slash commands
+├── listeners/         # Channel-specific listeners (telegram, gmail, gchat, discord)
+├── .claude/skills/    # Custom slash commands
 ├── config/            # Runtime configuration
 │   ├── channels.json
 │   ├── email-security.json
+│   ├── gchat-security.json
+│   ├── discord-security.json
 │   └── cron.json
 ├── memory/            # Persistent memory
-│   ├── short-term/    # Conversation buffer
-│   └── long-term/     # Persistent files
-├── events/            # Incoming events
+│   ├── short-term/    # Global conversation buffer
+│   ├── long-term/     # Persistent files
+│   ├── telegram/      # Telegram-specific context
+│   ├── discord/       # Discord-specific context
+│   ├── email/         # Email-specific context
+│   └── gchat/         # GChat-specific context
+├── websites/          # Generated client websites
 └── CLAUDE.md          # This file
 ```
 
@@ -92,14 +98,17 @@ Check your available tools at the start of each session. Common ones:
 
 | MCP | Purpose |
 |-----|---------|
-| telegram | Messaging |
-| gmail | Email |
+| telegram | Messaging + reactions |
+| gmail | Email + filters |
+| discord | Discord messaging + reactions |
 | google-docs | Documents |
 | google-sheets | Spreadsheets |
 | google-drive | File storage |
-| google-calendar | Calendar |
+| google-calendar | Calendar events |
+| google-chat | Google Chat messaging + reactions |
 | google-places | Business search |
 | image-gen | AI images |
+| finnhub | Stock quotes + news |
 | cron | Scheduled tasks |
 | memory | Persistence |
 | pdf | PDF conversion |
@@ -158,6 +167,8 @@ Config files live in `config/`:
 |------|---------|
 | `channels.json` | Enable/disable channels |
 | `email-security.json` | Email whitelist + forwarding |
+| `gchat-security.json` | Google Chat allowed spaces |
+| `discord-security.json` | Discord allowed channels |
 | `cron.json` | Scheduled jobs (managed via MCP) |
 
 When users ask to change settings, update the appropriate file.
