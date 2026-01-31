@@ -74,8 +74,8 @@ export default function SkillDetailPage({ params }: { params: Promise<{ name: st
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-xl font-bold text-white">{skill.name}</h2>
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <h2 className="text-xl font-bold text-white truncate">{skill.name}</h2>
           <p className="text-zinc-500 text-sm truncate">{skill.path}</p>
         </div>
       </div>
