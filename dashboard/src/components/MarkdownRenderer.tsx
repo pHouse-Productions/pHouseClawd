@@ -2,8 +2,30 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
+
+// Transform local file paths to API endpoint URLs
+function transformImageSrc(src: string): string {
+  // Check if it's a local file path (starts with / but not /api)
+  if (src.startsWith("/home/") || src.startsWith("/tmp/")) {
+    return `/api/chat/files?path=${encodeURIComponent(src)}`;
+  }
+  // Also handle memory/dashboard/files paths without leading slash
+  if (src.includes("memory/dashboard/files")) {
+    return `/api/chat/files?path=${encodeURIComponent(src)}`;
+  }
+  return src;
+}
+
+// Add paragraph breaks where sentences run together (e.g., "message.Now" → "message.\n\nNow")
+// This happens when Claude makes tool calls between text blocks
+function normalizeContent(content: string): string {
+  // Add line break after sentence-ending punctuation followed immediately by a capital letter
+  return content.replace(/([.!?])([A-Z])/g, '$1\n\n$2');
+}
 
 export default function MarkdownRenderer({ content }: { content: string }) {
+  const normalized = normalizeContent(content);
   return (
     <div
       className="prose prose-invert prose-sm max-w-none
@@ -25,7 +47,25 @@ export default function MarkdownRenderer({ content }: { content: string }) {
         wordBreak: "break-word",
       }}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        components={{
+          img: ({ src, alt, ...props }) => {
+            const srcStr = typeof src === "string" ? src : "";
+            return (
+              <img
+                src={srcStr ? transformImageSrc(srcStr) : ""}
+                alt={alt || ""}
+                className="max-w-full rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => srcStr && window.open(transformImageSrc(srcStr), "_blank")}
+                {...props}
+              />
+            );
+          },
+        }}
+      >
+        {normalized}
+      </ReactMarkdown>
     </div>
   );
 }

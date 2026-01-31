@@ -15,6 +15,9 @@ import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
 import { GChatChannel } from "./channels/gchat.js";
 import { DiscordChannel } from "./channels/discord.js";
+import { DashboardChannel } from "./channels/dashboard.js";
+import { parseCommand, supportsCommands, type ParsedCommand } from "./commands.js";
+import { getLocalTimestamp } from "./utils.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,6 +64,54 @@ const SHORT_TERM_RETAIN_RATIO = 0.25; // Keep 25% of buffer after rollup
 // Ensure short-term memory directory exists
 if (!fs.existsSync(SHORT_TERM_MEMORY_DIR)) {
   fs.mkdirSync(SHORT_TERM_MEMORY_DIR, { recursive: true });
+}
+
+// Dashboard chat file (for command responses)
+const DASHBOARD_CHAT_FILE = path.join(PROJECT_ROOT, "memory/dashboard-chat.json");
+
+interface DashboardChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+  status?: "pending" | "streaming" | "complete" | "error";
+}
+
+interface DashboardChatData {
+  messages: DashboardChatMessage[];
+  activeJobId?: string;
+}
+
+function loadDashboardChatData(): DashboardChatData {
+  try {
+    if (fs.existsSync(DASHBOARD_CHAT_FILE)) {
+      return JSON.parse(fs.readFileSync(DASHBOARD_CHAT_FILE, "utf-8"));
+    }
+  } catch (err) {
+    log(`[Watcher] Failed to load dashboard chat data: ${err}`);
+  }
+  return { messages: [] };
+}
+
+function saveDashboardChatData(data: DashboardChatData): void {
+  fs.writeFileSync(DASHBOARD_CHAT_FILE, JSON.stringify(data, null, 2));
+}
+
+// Helper to send a command response to dashboard chat
+function sendDashboardCommandResponse(assistantMessageId: string, message: string): void {
+  try {
+    const chatData = loadDashboardChatData();
+    const msgIdx = chatData.messages.findIndex(m => m.id === assistantMessageId);
+    if (msgIdx >= 0) {
+      chatData.messages[msgIdx].content = message;
+      chatData.messages[msgIdx].status = "complete";
+      saveDashboardChatData(chatData);
+    } else {
+      log(`[Watcher] Dashboard message ${assistantMessageId} not found for command response`);
+    }
+  } catch (err) {
+    log(`[Watcher] Failed to send dashboard command response: ${err}`);
+  }
 }
 
 // Channel config
@@ -153,7 +204,7 @@ function loadSessionData(): SessionData {
 
 // Get base channel name for settings fallback (e.g., "email-abc123" -> "email")
 function getBaseChannelName(sessionKey: string): string | null {
-  const match = sessionKey.match(/^(telegram|email|gchat|discord)-/);
+  const match = sessionKey.match(/^(telegram|email|gchat|discord|dashboard)-/);
   return match ? match[1] : null;
 }
 
@@ -222,6 +273,7 @@ const DEFAULT_RESPONSE_STYLES: Record<string, ResponseStyle> = {
   gchat: "streaming",
   discord: "streaming",
   email: "final",
+  dashboard: "streaming",
 };
 
 function getResponseStyle(sessionKey: string): ResponseStyle {
@@ -432,21 +484,8 @@ function getRunningJobForSession(sessionKey: string): string | null {
 export { killJob, getRunningJobId };
 
 // Short-term memory logging
-function getTorontoTimestamp(): string {
-  return new Date().toLocaleString("en-US", {
-    timeZone: "America/Toronto",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-}
-
 function logToShortTermMemory(channel: string, direction: "in" | "out", content: string): void {
-  const timestamp = getTorontoTimestamp();
+  const timestamp = getLocalTimestamp();
   const line = `[${timestamp}] [${channel}] [${direction}] ${content}\n`;
   fs.appendFileSync(SHORT_TERM_MEMORY_FILE, line);
 }
@@ -757,92 +796,103 @@ async function handleChannelEvent(
     logToShortTermMemory(channel.name, "in", incomingContent);
   }
 
-  // Handle special commands for interactive channels (telegram, gchat)
-  if ((channel.name === "telegram" || channel.name === "gchat" || channel.name === "discord") && payload.type === "message") {
-    const text = payload.text?.trim().toLowerCase();
+  // Handle special commands for interactive channels
+  // Use normalized message.isMessage and message.text instead of payload-specific fields
+  if (supportsCommands(channel.name) && event.message?.isMessage) {
+    const cmd = parseCommand(event.message.text);
 
-    // Helper to send a quick response via synthesized stream event
-    const sendQuickReply = (message: string) => {
-      const handler = channel.createHandler(event);
-      handler.onStreamEvent({
-        type: "assistant",
-        message: { content: [{ type: "text", text: message }] }
-      });
-      handler.onComplete(0);
-    };
+    if (cmd) {
+      log(`[Watcher] Processing command ${cmd.type} for ${channel.name}`);
 
-    if (text === "/new") {
-      clearSession(sessionKey);
-      log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
-      sendQuickReply("Fresh start, boss. New session is ready.");
-      return;
-    }
+      // Helper to send a quick response - works for all channels
+      const sendQuickReply = (message: string) => {
+        if (channel.name === "dashboard") {
+          // Dashboard: update the chat file directly
+          const assistantMessageId = payload.assistantMessageId;
+          if (assistantMessageId) {
+            sendDashboardCommandResponse(assistantMessageId, message);
+          }
+        } else {
+          // Other channels: use the handler to synthesize a response
+          const handler = channel.createHandler(event);
+          handler.onStreamEvent({
+            type: "assistant",
+            message: { content: [{ type: "text", text: message }] }
+          });
+          handler.onComplete(0);
+        }
+      };
 
-    if (text === "/restart") {
-      log(`[Watcher] Restart requested via /restart command`);
-      sendQuickReply("Restarting... Back in a few seconds.");
-      spawn(path.join(PROJECT_ROOT, "restart.sh"), [], {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
-      }).unref();
-      return;
-    }
+      switch (cmd.type) {
+        case "new":
+          clearSession(sessionKey);
+          log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
+          sendQuickReply("Fresh start, boss. New session is ready.");
+          return;
 
-    // Memory mode commands (session vs transcript)
-    if (text === "/memory session") {
-      setMemoryMode(sessionKey, "session");
-      log(`[Watcher] Memory mode changed to session for ${sessionKey}`);
-      sendQuickReply("Switched to session memory. I'll remember our conversation within this session.");
-      return;
-    }
+        case "restart":
+          log(`[Watcher] Restart requested via /restart command`);
+          sendQuickReply("Restarting... Back in a few seconds.");
+          spawn(path.join(PROJECT_ROOT, "restart.sh"), [], {
+            cwd: PROJECT_ROOT,
+            stdio: ["ignore", "ignore", "ignore"],
+            detached: true,
+          }).unref();
+          return;
 
-    // /memory transcript [optional lines count]
-    const transcriptMatch = text.match(/^\/memory transcript(?:\s+(\d+))?$/);
-    if (transcriptMatch) {
-      setMemoryMode(sessionKey, "transcript");
-      const lines = transcriptMatch[1] ? parseInt(transcriptMatch[1], 10) : null;
-      if (lines !== null) {
-        setTranscriptLines(sessionKey, lines);
+        case "memory_session":
+          setMemoryMode(sessionKey, "session");
+          log(`[Watcher] Memory mode changed to session for ${sessionKey}`);
+          sendQuickReply("Switched to session memory. I'll remember our conversation within this session.");
+          return;
+
+        case "memory_transcript": {
+          setMemoryMode(sessionKey, "transcript");
+          if (cmd.args?.lines !== undefined) {
+            setTranscriptLines(sessionKey, cmd.args.lines);
+          }
+          const currentLines = getTranscriptLines(sessionKey);
+          log(`[Watcher] Memory mode changed to transcript for ${sessionKey} (${currentLines} lines)`);
+          sendQuickReply(`Switched to transcript memory. Each message is a fresh session, but I'll see the last ${currentLines} messages from all channels.`);
+          return;
+        }
+
+        case "memory_status": {
+          const currentMode = getMemoryMode(sessionKey);
+          if (currentMode === "transcript") {
+            const currentLines = getTranscriptLines(sessionKey);
+            sendQuickReply(`Memory mode: transcript (${currentLines} lines)\n\nUse /memory session or /memory transcript [lines] to switch.`);
+          } else {
+            sendQuickReply(`Memory mode: ${currentMode}\n\nUse /memory session or /memory transcript [lines] to switch.`);
+          }
+          return;
+        }
+
+        case "queue_on":
+          setQueueMode(sessionKey, "queue");
+          log(`[Watcher] Queue mode changed to queue for ${sessionKey}`);
+          sendQuickReply("Queue mode ON. Messages will pile up and process after the current job finishes.");
+          return;
+
+        case "queue_off":
+          setQueueMode(sessionKey, "interrupt");
+          log(`[Watcher] Queue mode changed to interrupt for ${sessionKey}`);
+          sendQuickReply("Queue mode OFF (interrupt). New messages will kill the current job and start fresh.");
+          return;
+
+        case "queue_status": {
+          const currentMode = getQueueMode(sessionKey);
+          const status = currentMode === "queue" ? "ON (messages queue up)" : "OFF (messages interrupt)";
+          sendQuickReply(`Queue mode: ${status}\n\nUse /queue on or /queue off to switch.`);
+          return;
+        }
+
+        // Note: /stop and /stop_job are handled with priority in processEvent() before queueing
+        default:
+          // Command was parsed but not handled here (e.g., /stop)
+          break;
       }
-      const currentLines = getTranscriptLines(sessionKey);
-      log(`[Watcher] Memory mode changed to transcript for ${sessionKey} (${currentLines} lines)`);
-      sendQuickReply(`Switched to transcript memory. Each message is a fresh session, but I'll see the last ${currentLines} messages from all channels.`);
-      return;
     }
-
-    if (text === "/memory") {
-      const currentMode = getMemoryMode(sessionKey);
-      if (currentMode === "transcript") {
-        const currentLines = getTranscriptLines(sessionKey);
-        sendQuickReply(`Memory mode: transcript (${currentLines} lines)\n\nUse /memory session or /memory transcript [lines] to switch.`);
-      } else {
-        sendQuickReply(`Memory mode: ${currentMode}\n\nUse /memory session or /memory transcript [lines] to switch.`);
-      }
-      return;
-    }
-
-    // Queue mode commands (queue vs interrupt)
-    if (text === "/queue on" || text === "/queue off") {
-      const newMode = text === "/queue on" ? "queue" : "interrupt";
-      setQueueMode(sessionKey, newMode);
-      log(`[Watcher] Queue mode changed to ${newMode} for ${sessionKey}`);
-      if (newMode === "queue") {
-        sendQuickReply("Queue mode ON. Messages will pile up and process after the current job finishes.");
-      } else {
-        sendQuickReply("Queue mode OFF (interrupt). New messages will kill the current job and start fresh.");
-      }
-      return;
-    }
-
-    if (text === "/queue") {
-      const currentMode = getQueueMode(sessionKey);
-      const status = currentMode === "queue" ? "ON (messages queue up)" : "OFF (messages interrupt)";
-      sendQuickReply(`Queue mode: ${status}\n\nUse /queue on or /queue off to switch.`);
-      return;
-    }
-
-    // Note: /stop is handled with priority in processEvent() before queueing
   }
 
   // Note: Email security filtering is now handled by the email channel itself
@@ -1056,32 +1106,36 @@ async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Pr
 
   // PRIORITY: Handle /stop command immediately, before queueing
   // This ensures stop commands can interrupt running jobs
-  if ((channel.name === "telegram" || channel.name === "gchat" || channel.name === "discord") && payload.type === "message") {
-    const text = payload.text?.trim().toLowerCase();
-    if (text === "/stop" || text?.startsWith("/stop ")) {
+  if (supportsCommands(channel.name) && event.message?.isMessage) {
+    const cmd = parseCommand(event.message.text);
+
+    if (cmd && (cmd.type === "stop" || cmd.type === "stop_job")) {
       log(`[Watcher] Processing /stop command with priority (bypassing queue)`);
 
-      // Helper to send a quick response via synthesized stream event
+      // Helper to send a quick response - works for all channels
       const sendQuickReply = (message: string) => {
-        const handler = channel.createHandler(event);
-        handler.onStreamEvent({
-          type: "assistant",
-          message: { content: [{ type: "text", text: message }] }
-        });
-        handler.onComplete(0);
+        if (channel.name === "dashboard") {
+          const assistantMessageId = payload.assistantMessageId;
+          if (assistantMessageId) {
+            sendDashboardCommandResponse(assistantMessageId, message);
+          }
+        } else {
+          const handler = channel.createHandler(event);
+          handler.onStreamEvent({
+            type: "assistant",
+            message: { content: [{ type: "text", text: message }] }
+          });
+          handler.onComplete(0);
+        }
       };
 
-      // Check if a specific job ID was provided
-      const parts = payload.text?.trim().split(/\s+/);
-      const specificJobId = parts && parts.length > 1 ? parts[1] : null;
-
-      if (specificJobId) {
-        const killed = killJob(specificJobId);
+      if (cmd.type === "stop_job" && cmd.args?.jobId) {
+        const killed = killJob(cmd.args.jobId);
         if (killed) {
-          log(`[Watcher] Stopped job ${specificJobId} via /stop command`);
-          sendQuickReply(`Done. Killed job ${specificJobId}.`);
+          log(`[Watcher] Stopped job ${cmd.args.jobId} via /stop command`);
+          sendQuickReply(`Done. Killed job ${cmd.args.jobId}.`);
         } else {
-          sendQuickReply(`Couldn't find running job ${specificJobId}. It might have already finished.`);
+          sendQuickReply(`Couldn't find running job ${cmd.args.jobId}. It might have already finished.`);
         }
       } else {
         const runningJobId = getRunningJobId();
@@ -1490,6 +1544,7 @@ async function watch(): Promise<void> {
     EmailChannel,
     GChatChannel,
     DiscordChannel,
+    DashboardChannel,
   ];
 
   // Filter to only enabled channels

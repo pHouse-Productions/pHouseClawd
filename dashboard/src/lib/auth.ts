@@ -18,10 +18,18 @@ export async function authFetch(
   options: RequestInit = {}
 ): Promise<Response> {
   const password = getStoredPassword();
+
+  // For FormData, we need to let the browser set the Content-Type with boundary
+  // So we only add headers, don't replace them completely
   const headers = new Headers(options.headers);
 
   if (password) {
     headers.set("X-Dashboard-Auth", password);
+  }
+
+  // When body is FormData, don't set Content-Type - browser will set it with boundary
+  if (options.body instanceof FormData) {
+    headers.delete("Content-Type");
   }
 
   return fetch(url, {

@@ -1105,6 +1105,7 @@ export default function ChannelsPage() {
       case "email": return "Email";
       case "gchat": return "Google Chat";
       case "discord": return "Discord";
+      case "dashboard": return "Dashboard Chat";
       default: return channel.charAt(0).toUpperCase() + channel.slice(1);
     }
   };
@@ -1116,7 +1117,8 @@ export default function ChannelsPage() {
   };
 
   const canEnableChannel = (channel: string) => {
-    const googleAuthConfigured = config?.googleToken.status === "configured";
+    // Accept both "configured" and "expired" - expired tokens can be auto-refreshed via refresh_token
+    const googleAuthConfigured = config?.googleToken.status === "configured" || config?.googleToken.status === "expired";
     const telegramConfigured = config?.telegram.TELEGRAM_BOT_TOKEN && !isPlaceholderValue(config.telegram.TELEGRAM_BOT_TOKEN);
     const discordConfigured = config?.discord?.DISCORD_BOT_TOKEN && !isPlaceholderValue(config.discord.DISCORD_BOT_TOKEN);
 
@@ -1132,23 +1134,36 @@ export default function ChannelsPage() {
       if (!discordConfigured) {
         return { canEnable: false, reason: "Bot token required" };
       }
+    } else if (channel === "dashboard") {
+      // Dashboard is always enableable - it's built into the app
+      return { canEnable: true, reason: "" };
     }
     return { canEnable: true, reason: "" };
   };
 
   const getSessionKeyForChannel = (channel: string): string | null => {
     if (!sessionSettings) return null;
-    // First check if there's an existing session key for this channel
-    const existingKey = Object.keys(sessionSettings.modes).find(key => {
+    // Find all session keys that match this channel
+    const matchingKeys = Object.keys(sessionSettings.modes).filter(key => {
       const baseChannel = key.includes('-') ? key.split('-')[0] : key;
       return baseChannel === channel;
     });
-    if (existingKey) return existingKey;
+
+    if (matchingKeys.length > 0) {
+      // Prefer the more specific key (e.g., "dashboard-default" over "dashboard")
+      // Sort by length descending so more specific keys come first
+      matchingKeys.sort((a, b) => b.length - a.length);
+      return matchingKeys[0];
+    }
 
     // For enabled channels without a session yet, return a default key
     // This allows users to pre-configure settings before their first message
     const channelEnabled = channels[channel]?.enabled;
     if (channelEnabled) {
+      // For dashboard, use the actual session key format the watcher uses
+      if (channel === "dashboard") {
+        return "dashboard-default";
+      }
       // Use the base channel name as the default key
       // The watcher will match this or create a more specific one on first message
       return channel;
@@ -1325,6 +1340,28 @@ export default function ChannelsPage() {
                 onSaveDiscordSecurity={saveDiscordSecurity}
                 enabled={channels.discord.enabled}
               />
+            </ChannelSection>
+          )}
+
+          {/* Dashboard Chat */}
+          {channels.dashboard && (
+            <ChannelSection
+              channelKey="dashboard"
+              displayName={getChannelDisplayName("dashboard")}
+              enabled={channels.dashboard.enabled}
+              canEnable={canEnableChannel("dashboard").canEnable}
+              disableReason={canEnableChannel("dashboard").reason}
+              onToggle={() => toggleChannel("dashboard", channels.dashboard.enabled)}
+              sessionKey={getSessionKeyForChannel("dashboard")}
+              sessionSettings={sessionSettings}
+              onSaveSessionSetting={saveSessionSetting}
+              setSessionSettings={setSessionSettings}
+            >
+              {channels.dashboard.enabled && (
+                <p className="text-zinc-400 text-sm">
+                  The dashboard chat is available in the Chat tab. Configure session settings below.
+                </p>
+              )}
             </ChannelSection>
           )}
         </div>

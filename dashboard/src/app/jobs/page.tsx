@@ -59,6 +59,9 @@ function ChannelBadge({ channel }: { channel: string }) {
     telegram: "bg-sky-500/20 text-sky-400",
     email: "bg-amber-500/20 text-amber-400",
     cron: "bg-violet-500/20 text-violet-400",
+    dashboard: "bg-emerald-500/20 text-emerald-400",
+    gchat: "bg-green-500/20 text-green-400",
+    discord: "bg-indigo-500/20 text-indigo-400",
   };
   return (
     <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${colors[channel] || "bg-zinc-700 text-zinc-400"}`}>

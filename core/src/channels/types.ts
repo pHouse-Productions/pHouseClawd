@@ -6,11 +6,19 @@ export interface StreamEvent {
   [key: string]: any;
 }
 
+// Normalized message fields - channels populate this from their source
+export interface NormalizedMessage {
+  text?: string;           // The raw message text (for command parsing, etc.)
+  from?: string;           // Sender display name
+  isMessage: boolean;      // Is this a user message (vs reaction, edit, etc.)
+}
+
 // Event returned from channel polling
 export interface ChannelEvent {
   sessionKey: string;  // Logical session key (e.g., "telegram-5473044160")
   prompt: string;      // What to send to Claude
-  payload: any;        // Raw event data for the handler
+  payload: any;        // Raw event data for the handler (channel-specific)
+  message: NormalizedMessage;  // Normalized common fields
 }
 
 // Handler for a single event's output stream

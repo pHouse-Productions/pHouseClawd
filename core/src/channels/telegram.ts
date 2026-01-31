@@ -197,6 +197,11 @@ export const TelegramChannel: ChannelDefinition = {
             text,
             verbosity: "streaming" as Verbosity,
           },
+          message: {
+            text,
+            from,
+            isMessage: true,
+          },
         });
 
         log(`[TelegramChannel] Received message from ${from}: ${text.slice(0, 50)}...`);
@@ -237,6 +242,11 @@ export const TelegramChannel: ChannelDefinition = {
               caption,
               image_path: imagePath,
               verbosity: "streaming" as Verbosity,
+            },
+            message: {
+              text: caption,
+              from,
+              isMessage: true,
             },
           });
 
@@ -283,6 +293,11 @@ export const TelegramChannel: ChannelDefinition = {
               file_name: originalName,
               mime_type: doc.mime_type || "application/octet-stream",
               verbosity: "streaming" as Verbosity,
+            },
+            message: {
+              text: caption,
+              from,
+              isMessage: true,
             },
           });
 

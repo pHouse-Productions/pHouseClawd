@@ -90,6 +90,15 @@ pHouseClawd/
 └── CLAUDE.md          # This file
 ```
 
+### Dashboard Development
+The dashboard (`dashboard/`) is a Next.js app. Build scripts:
+- `npm run build` - Fast build (skips type checking and linting)
+- `npm run build:check` - Full build with type checking and ESLint (use before finishing work)
+- `npm run typecheck` - Type check only
+- `npm run lint` - Lint only
+
+**Always run `npm run build:check` before wrapping up dashboard changes** to catch any type errors or lint issues.
+
 ---
 
 ## MCP Tools
@@ -172,6 +181,14 @@ Config files live in `config/`:
 | `cron.json` | Scheduled jobs (managed via MCP) |
 
 When users ask to change settings, update the appropriate file.
+
+### Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `PHOUSE_TIMEZONE` | Timezone for timestamps in logs and UI | `America/Toronto` |
+
+Set these in your `.env` file or shell environment.
 
 ---
 

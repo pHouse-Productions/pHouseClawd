@@ -491,6 +491,11 @@ ${email.body}`;
               sessionKey,
               prompt,
               payload: email,
+              message: {
+                text: email.body,
+                from: email.from,
+                isMessage: true,
+              },
             });
           } catch (err) {
             log(`[EmailChannel] Error fetching message ${messageId}: ${err}`);

@@ -458,6 +458,11 @@ export const GChatChannel: ChannelDefinition = {
                   downloaded_files: downloadedFiles,
                   verbosity: "streaming" as Verbosity,
                 },
+                message: {
+                  text,
+                  from: senderDisplayName || "Someone",
+                  isMessage: true,
+                },
               });
             }
           } catch (err: any) {

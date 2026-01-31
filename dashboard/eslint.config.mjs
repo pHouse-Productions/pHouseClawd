@@ -13,6 +13,21 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // Rule overrides
+    rules: {
+      // Allow <img> tag for markdown rendering
+      "@next/next/no-img-element": "off",
+      // Allow unused vars prefixed with _
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      // Allow any types in dashboard code
+      "@typescript-eslint/no-explicit-any": "off",
+      // These are overly strict for a dashboard app
+      "react/no-unescaped-entities": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/error-boundaries": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

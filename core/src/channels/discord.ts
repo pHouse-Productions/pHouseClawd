@@ -325,6 +325,11 @@ export const DiscordChannel: ChannelDefinition = {
           verbosity: "streaming" as Verbosity,
           _client: client,
         },
+        message: {
+          text,
+          from,
+          isMessage: true,
+        },
       });
     });
 
