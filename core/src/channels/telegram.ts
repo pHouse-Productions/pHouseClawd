@@ -96,17 +96,60 @@ class TelegramEventHandler implements ChannelEventHandler {
   private sendMessage(message: string): void {
     if (!message || !message.trim()) return;
 
-    try {
-      const proc = spawn("npx", ["tsx", SEND_SCRIPT, String(this.chatId), message], {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
-      });
-      proc.unref();
-      log(`[TelegramChannel] Sent to ${this.chatId}: ${message.slice(0, 100)}${message.length > 100 ? "..." : ""}`);
-    } catch (err) {
-      log(`[TelegramChannel] Failed to send: ${err}`);
+    // Telegram has a 4096 character limit - split long messages
+    const MAX_LENGTH = 4000; // Leave some margin
+    const chunks = this.splitMessage(message, MAX_LENGTH);
+
+    log(`[TelegramChannel] Sending ${message.length} chars in ${chunks.length} chunk(s) to ${this.chatId}`);
+
+    // Send chunks with delay to maintain order
+    chunks.forEach((chunk, index) => {
+      setTimeout(() => {
+        try {
+          const proc = spawn("npx", ["tsx", SEND_SCRIPT, String(this.chatId), chunk], {
+            cwd: PROJECT_ROOT,
+            stdio: ["ignore", "ignore", "ignore"],
+            detached: true,
+          });
+          proc.unref();
+        } catch (err) {
+          log(`[TelegramChannel] Failed to send chunk: ${err}`);
+        }
+      }, index * 500); // 500ms between each chunk
+    });
+  }
+
+  private splitMessage(message: string, maxLength: number): string[] {
+    const chunks: string[] = [];
+
+    if (message.length <= maxLength) {
+      chunks.push(message);
+    } else {
+      // Split on paragraph breaks first, then by length
+      let remaining = message;
+      while (remaining.length > 0) {
+        if (remaining.length <= maxLength) {
+          chunks.push(remaining);
+          break;
+        }
+
+        // Try to split at a paragraph break
+        let splitIndex = remaining.lastIndexOf("\n\n", maxLength);
+        if (splitIndex === -1 || splitIndex < maxLength / 2) {
+          // No good paragraph break, try single newline
+          splitIndex = remaining.lastIndexOf("\n", maxLength);
+        }
+        if (splitIndex === -1 || splitIndex < maxLength / 2) {
+          // No good newline, just split at max length
+          splitIndex = maxLength;
+        }
+
+        chunks.push(remaining.slice(0, splitIndex));
+        remaining = remaining.slice(splitIndex).trimStart();
+      }
     }
+
+    return chunks;
   }
 
   private sendTypingIndicator(): void {

@@ -1,6 +1,13 @@
 {
-  "allowedChannels": ["1464800085245431830"],
-  "allowedGuilds": ["1464800084649578653"],
+  "allowedChannels": [
+    "1464800085245431830",
+    "1466885231050227782",
+    "1466899925127266325"
+  ],
+  "allowedGuilds": [
+    "1464800084649578653"
+  ],
+  "autoIncludeNewChannels": true,
   "myUserId": null,
   "userNames": {}
 }

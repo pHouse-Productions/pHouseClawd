@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
 
 // Load environment variables from sibling pHouseMcp directory
-config({ path: path.resolve(PROJECT_ROOT, "../pHouseMcp/.env") });
+config({ path: path.resolve(PROJECT_ROOT, "../pHouseMcp/.env"), override: true });
 
 const channelId = process.argv[2];
 const message = process.argv[3];

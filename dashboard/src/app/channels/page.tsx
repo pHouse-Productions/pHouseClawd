@@ -700,12 +700,13 @@ function DiscordChannelSelector({
   config,
   onSave,
 }: {
-  config: { allowedChannels: string[]; allowedGuilds: string[]; myUserId: string | null; userNames: Record<string, string> };
-  onSave: (config: { allowedChannels: string[]; allowedGuilds: string[]; myUserId: string | null; userNames: Record<string, string> }) => Promise<void>;
+  config: { allowedChannels: string[]; allowedGuilds: string[]; autoIncludeNewChannels?: boolean; myUserId: string | null; userNames: Record<string, string> };
+  onSave: (config: { allowedChannels: string[]; allowedGuilds: string[]; autoIncludeNewChannels?: boolean; myUserId: string | null; userNames: Record<string, string> }) => Promise<void>;
 }) {
   const [guilds, setGuilds] = useState<{ id: string; name: string; channels: { id: string; name: string; type: string }[] }[]>([]);
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set(config.allowedChannels));
   const [selectedGuilds, setSelectedGuilds] = useState<Set<string>>(new Set(config.allowedGuilds));
+  const [autoInclude, setAutoInclude] = useState(config.autoIncludeNewChannels ?? false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -759,6 +760,7 @@ function DiscordChannelSelector({
       await onSave({
         allowedChannels: Array.from(selectedChannels),
         allowedGuilds: Array.from(selectedGuilds),
+        autoIncludeNewChannels: autoInclude,
         myUserId: config.myUserId,
         userNames: config.userNames,
       });
@@ -769,7 +771,8 @@ function DiscordChannelSelector({
 
   const hasChanges =
     JSON.stringify(Array.from(selectedChannels).sort()) !== JSON.stringify(config.allowedChannels.sort()) ||
-    JSON.stringify(Array.from(selectedGuilds).sort()) !== JSON.stringify(config.allowedGuilds.sort());
+    JSON.stringify(Array.from(selectedGuilds).sort()) !== JSON.stringify(config.allowedGuilds.sort()) ||
+    autoInclude !== (config.autoIncludeNewChannels ?? false);
 
   return (
     <div className="space-y-3">
@@ -793,6 +796,21 @@ function DiscordChannelSelector({
 
         {guilds.length === 0 && !loading && !error && (
           <p className="text-zinc-500 text-sm">No servers found. Make sure the bot is invited to a server and has proper permissions.</p>
+        )}
+
+        {guilds.length > 0 && (
+          <label className="flex items-center gap-3 p-2 bg-zinc-800 rounded cursor-pointer hover:bg-zinc-750 mb-2">
+            <input
+              type="checkbox"
+              checked={autoInclude}
+              onChange={(e) => setAutoInclude(e.target.checked)}
+              className="w-4 h-4 rounded border-zinc-600 bg-zinc-700 text-green-500 focus:ring-green-500 focus:ring-offset-0"
+            />
+            <div className="flex-1">
+              <div className="text-sm text-zinc-300">Auto-include new channels</div>
+              <div className="text-xs text-zinc-500">When enabled, any new channel added to these servers will automatically be monitored</div>
+            </div>
+          </label>
         )}
 
         <div className="space-y-3 max-h-64 overflow-y-auto">

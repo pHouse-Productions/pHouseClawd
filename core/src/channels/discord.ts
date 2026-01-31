@@ -34,6 +34,7 @@ const DISCORD_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/discord-sec
 interface DiscordSecurityConfig {
   allowedChannels: string[]; // Channel IDs to listen to
   allowedGuilds?: string[]; // Optional: Guild IDs (if empty, uses channels list)
+  autoIncludeNewChannels?: boolean; // If true, accept any channel from allowed guilds
   myUserId?: string; // Bot's user ID to filter out self-messages
   userNames?: Record<string, string>; // Mapping of user IDs to display names
 }
@@ -45,6 +46,7 @@ function loadSecurityConfig(): DiscordSecurityConfig {
       return {
         allowedChannels: config.allowedChannels || [],
         allowedGuilds: config.allowedGuilds || [],
+        autoIncludeNewChannels: config.autoIncludeNewChannels || false,
         myUserId: config.myUserId || undefined,
         userNames: config.userNames || {},
       };
@@ -194,20 +196,63 @@ class DiscordEventHandler implements ChannelEventHandler {
   private sendMessage(message: string): void {
     if (!message || !message.trim()) return;
 
-    // Track this message to prevent echo loops
-    trackSentMessage(message);
+    // Discord has a 2000 character limit - split long messages
+    const MAX_LENGTH = 1900; // Leave some margin
+    const chunks = this.splitMessage(message, MAX_LENGTH);
 
-    try {
-      const proc = spawn("npx", ["tsx", SEND_SCRIPT, this.channelId, message], {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
-      });
-      proc.unref();
-      log(`[DiscordChannel] Sent to ${this.channelId}: ${message.slice(0, 100)}${message.length > 100 ? "..." : ""}`);
-    } catch (err) {
-      log(`[DiscordChannel] Failed to send: ${err}`);
+    log(`[DiscordChannel] Sending ${message.length} chars in ${chunks.length} chunk(s) to ${this.channelId}`);
+
+    // Track all chunks to prevent echo loops
+    chunks.forEach(chunk => trackSentMessage(chunk));
+
+    // Send chunks with delay to maintain order
+    chunks.forEach((chunk, index) => {
+      setTimeout(() => {
+        try {
+          const proc = spawn("npx", ["tsx", SEND_SCRIPT, this.channelId, chunk], {
+            cwd: PROJECT_ROOT,
+            stdio: ["ignore", "ignore", "ignore"],
+            detached: true,
+          });
+          proc.unref();
+        } catch (err) {
+          log(`[DiscordChannel] Failed to send chunk: ${err}`);
+        }
+      }, index * 500); // 500ms between each chunk
+    });
+  }
+
+  private splitMessage(message: string, maxLength: number): string[] {
+    const chunks: string[] = [];
+
+    if (message.length <= maxLength) {
+      chunks.push(message);
+    } else {
+      // Split on paragraph breaks first, then by length
+      let remaining = message;
+      while (remaining.length > 0) {
+        if (remaining.length <= maxLength) {
+          chunks.push(remaining);
+          break;
+        }
+
+        // Try to split at a paragraph break
+        let splitIndex = remaining.lastIndexOf("\n\n", maxLength);
+        if (splitIndex === -1 || splitIndex < maxLength / 2) {
+          // No good paragraph break, try single newline
+          splitIndex = remaining.lastIndexOf("\n", maxLength);
+        }
+        if (splitIndex === -1 || splitIndex < maxLength / 2) {
+          // No good newline, just split at max length
+          splitIndex = maxLength;
+        }
+
+        chunks.push(remaining.slice(0, splitIndex));
+        remaining = remaining.slice(splitIndex).trimStart();
+      }
     }
+
+    return chunks;
   }
 
   private sendTypingIndicator(): void {
@@ -253,9 +298,24 @@ export const DiscordChannel: ChannelDefinition = {
 
       const config = loadSecurityConfig();
       const channelId = msg.channel.id;
+      const guildId = msg.guild?.id;
 
       // Check if this channel is allowed
-      if (config.allowedChannels.length > 0 && !config.allowedChannels.includes(channelId)) {
+      // If autoIncludeNewChannels is true, allow any channel from an allowed guild
+      // Otherwise, require explicit channel allowlist
+      let isAllowed = false;
+      if (config.autoIncludeNewChannels && guildId && config.allowedGuilds?.includes(guildId)) {
+        // Auto-include mode: accept any channel from allowed guilds
+        isAllowed = true;
+      } else if (config.allowedChannels.length > 0) {
+        // Explicit channel list mode
+        isAllowed = config.allowedChannels.includes(channelId);
+      } else {
+        // No restrictions configured
+        isAllowed = true;
+      }
+
+      if (!isAllowed) {
         return;
       }
 

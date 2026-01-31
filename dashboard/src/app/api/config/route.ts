@@ -280,7 +280,7 @@ export async function GET() {
       })(),
       emailSecurity: emailSecurityConfig,
       gchatSecurity: gchatSecurityConfig || { allowedSpaces: [], myUserId: "" },
-      discordSecurity: discordSecurityConfig || { allowedChannels: [], allowedGuilds: [], myUserId: null, userNames: {} },
+      discordSecurity: discordSecurityConfig || { allowedChannels: [], allowedGuilds: [], autoIncludeNewChannels: false, myUserId: null, userNames: {} },
       claudeMd: claudeMd,
     });
   } catch (error) {

@@ -24,7 +24,7 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
 
 // Load environment variables from sibling pHouseMcp directory
-config({ path: path.resolve(PROJECT_ROOT, "../pHouseMcp/.env") });
+config({ path: path.resolve(PROJECT_ROOT, "../pHouseMcp/.env"), override: true });
 
 // Generate a deterministic UUID v5 from a namespace + name
 const NAMESPACE_UUID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
@@ -933,6 +933,14 @@ async function handleChannelEvent(
     }
   }
 
+  // In session mode (resuming), prefix with timestamp so Claude knows when this message arrived
+  // Transcript mode already has timestamps in the injected history
+  const useNewSession = isNewSession || isTranscriptMode;
+  if (!useNewSession && !isTranscriptMode) {
+    const timestamp = getLocalTimestamp();
+    finalPrompt = `[${timestamp}]\n${finalPrompt}`;
+  }
+
   // Inject channel-specific context (tool instructions, capabilities)
   const channelContext = channel.getChannelContext?.();
   if (channelContext) {
@@ -949,7 +957,7 @@ async function handleChannelEvent(
 
   // Spawn Claude
   // In transcript mode: always new session. In session mode: resume if exists.
-  const useNewSession = isTranscriptMode || isNewSession;
+  // (useNewSession already defined above when adding timestamp prefix)
 
   // Create a job file for this invocation
   const jobId = generateJobId();
