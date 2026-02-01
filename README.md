@@ -139,7 +139,8 @@ pHouseClawd/
 │   ├── gmail/             # Gmail inbox watcher daemon
 │   ├── gchat/             # Google Chat listener
 │   └── discord/           # Discord bot listener
-├── dashboard/             # Web UI (Next.js)
+├── api/                   # Express API server (port 3100)
+├── dashboard/             # Web UI (Vite + React, static files)
 ├── memory/
 │   ├── short-term/        # Global conversation buffer (auto-logged, gitignored)
 │   ├── long-term/         # Persistent memories (gitignored)
