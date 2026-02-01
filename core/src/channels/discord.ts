@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, TextChannel, DMChannel, NewsChannel, AttachmentBuilder, Message } from "discord.js";
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as https from "https";
@@ -125,6 +125,7 @@ class DiscordStreamHandler implements StreamHandler {
   private channelId: string;
   private messageId: string;
   private discordClient: Client | null = null;
+  private typingProcess: ChildProcess | null = null;
 
   constructor(channelId: string, messageId: string, discordClient?: Client) {
     this.channelId = channelId;
@@ -178,14 +179,41 @@ class DiscordStreamHandler implements StreamHandler {
 
   async startTyping(): Promise<void> {
     try {
+      // Kill old typing process before spawning a new one to prevent buildup
+      if (this.typingProcess && !this.typingProcess.killed) {
+        try {
+          this.typingProcess.kill("SIGKILL");
+        } catch {
+          // Process may have already exited
+        }
+      }
+
       const proc = spawn("npx", ["tsx", TYPING_SCRIPT, this.channelId], {
         cwd: PROJECT_ROOT,
         stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
+        detached: false, // Don't detach so we can track and kill it
       });
-      proc.unref();
+      this.typingProcess = proc;
+
+      // Clean up reference when process exits
+      proc.on("exit", () => {
+        if (this.typingProcess === proc) {
+          this.typingProcess = null;
+        }
+      });
     } catch (err) {
       log(`[DiscordChannel] Failed to send typing: ${err}`);
+    }
+  }
+
+  async stopTyping(): Promise<void> {
+    if (this.typingProcess && !this.typingProcess.killed) {
+      try {
+        this.typingProcess.kill("SIGKILL");
+      } catch {
+        // Process may have already exited
+      }
+      this.typingProcess = null;
     }
   }
 

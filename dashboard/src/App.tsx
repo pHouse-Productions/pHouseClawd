@@ -20,7 +20,9 @@ import Cron from "@/routes/Cron";
 import Config from "@/routes/Config";
 import ClaudeMd from "@/routes/ClaudeMd";
 import Sites from "@/routes/Sites";
+import SiteLogs from "@/routes/SiteLogs";
 import Processes from "@/routes/Processes";
+import SystemInstructions from "@/routes/SystemInstructions";
 
 export default function App() {
   return (
@@ -47,7 +49,9 @@ export default function App() {
             <Route path="/config" element={<Config />} />
             <Route path="/config/claude-md" element={<ClaudeMd />} />
             <Route path="/sites" element={<Sites />} />
+            <Route path="/sites/:name/logs/:type" element={<SiteLogs />} />
             <Route path="/processes" element={<Processes />} />
+            <Route path="/system" element={<SystemInstructions />} />
           </Routes>
         </main>
       </div>

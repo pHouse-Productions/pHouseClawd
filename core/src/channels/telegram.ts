@@ -1,5 +1,5 @@
 import { Telegraf } from "telegraf";
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as https from "https";
@@ -63,6 +63,7 @@ async function downloadFile(bot: Telegraf, fileId: string, destPath: string): Pr
 class TelegramStreamHandler implements StreamHandler {
   private chatId: number;
   private messageId: number | null;
+  private typingProcess: ChildProcess | null = null;
 
   constructor(chatId: number, messageId: number | null) {
     this.chatId = chatId;
@@ -96,14 +97,41 @@ class TelegramStreamHandler implements StreamHandler {
 
   async startTyping(): Promise<void> {
     try {
+      // Kill old typing process before spawning a new one to prevent buildup
+      if (this.typingProcess && !this.typingProcess.killed) {
+        try {
+          this.typingProcess.kill("SIGKILL");
+        } catch {
+          // Process may have already exited
+        }
+      }
+
       const proc = spawn("npx", ["tsx", TYPING_SCRIPT, String(this.chatId)], {
         cwd: PROJECT_ROOT,
         stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
+        detached: false, // Don't detach so we can track and kill it
       });
-      proc.unref();
+      this.typingProcess = proc;
+
+      // Clean up reference when process exits
+      proc.on("exit", () => {
+        if (this.typingProcess === proc) {
+          this.typingProcess = null;
+        }
+      });
     } catch (err) {
       log(`[TelegramChannel] Failed to send typing: ${err}`);
+    }
+  }
+
+  async stopTyping(): Promise<void> {
+    if (this.typingProcess && !this.typingProcess.killed) {
+      try {
+        this.typingProcess.kill("SIGKILL");
+      } catch {
+        // Process may have already exited
+      }
+      this.typingProcess = null;
     }
   }
 

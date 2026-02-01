@@ -52,6 +52,11 @@ const SESSIONS_FILE = path.join(LOGS_DIR, "sessions.json");
 const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
 const PID_FILE = path.join(PROJECT_ROOT, "watcher.pid");
 
+// Source files for CLAUDE.md generation
+const SOUL_FILE = path.join(PROJECT_ROOT, "SOUL.md");
+const SYSTEM_FILE = path.join(PROJECT_ROOT, "SYSTEM.md");
+const CLAUDE_FILE = path.join(PROJECT_ROOT, "CLAUDE.md");
+
 // Ensure jobs directory exists
 if (!fs.existsSync(JOBS_DIR)) {
   fs.mkdirSync(JOBS_DIR, { recursive: true });
@@ -406,6 +411,36 @@ function log(message: string) {
   process.stdout.write(line);
 }
 
+// Merge SOUL.md + SYSTEM.md into CLAUDE.md before each job
+// This ensures Claude Code always sees the latest combined context
+function refreshClaudeMd(): void {
+  try {
+    let content = "";
+
+    // Read SOUL.md (identity/personality)
+    if (fs.existsSync(SOUL_FILE)) {
+      content += fs.readFileSync(SOUL_FILE, "utf-8").trim();
+    } else {
+      log("[Watcher] Warning: SOUL.md not found");
+    }
+
+    // Add separator and SYSTEM.md (technical reference)
+    if (fs.existsSync(SYSTEM_FILE)) {
+      if (content) content += "\n\n---\n\n";
+      content += fs.readFileSync(SYSTEM_FILE, "utf-8").trim();
+    } else {
+      log("[Watcher] Warning: SYSTEM.md not found");
+    }
+
+    // Write merged content to CLAUDE.md
+    if (content) {
+      fs.writeFileSync(CLAUDE_FILE, content + "\n");
+    }
+  } catch (err) {
+    log(`[Watcher] Error refreshing CLAUDE.md: ${err}`);
+  }
+}
+
 // Job file management
 interface JobData {
   id: string;
@@ -574,7 +609,9 @@ function releaseGlobalSlot(): void {
 // Short-term memory logging
 function logToShortTermMemory(channel: string, direction: "in" | "out", content: string): void {
   const timestamp = getLocalTimestamp();
-  const line = `[${timestamp}] [${channel}] [${direction}] ${content}\n`;
+  // Collapse multi-line content to single line for cleaner buffer
+  const singleLine = content.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
+  const line = `[${timestamp}] [${channel}] [${direction}] ${singleLine}\n`;
   fs.appendFileSync(SHORT_TERM_MEMORY_FILE, line);
 }
 
@@ -636,8 +673,44 @@ function getRecentTranscriptContext(sessionKey?: string): string {
   }
 }
 
-// Track if rollup is in progress to avoid concurrent rollups
-let rollupInProgress = false;
+// File-based lock to prevent concurrent rollup jobs
+// Uses a lock file instead of just in-memory flag for extra safety
+const ROLLUP_LOCK_FILE = path.join(ROLLUP_PENDING_DIR, ".rollup.lock");
+const ROLLUP_LOCK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes - stale lock threshold
+
+function acquireRollupLock(): boolean {
+  try {
+    // Check if lock exists and is recent
+    if (fs.existsSync(ROLLUP_LOCK_FILE)) {
+      const stats = fs.statSync(ROLLUP_LOCK_FILE);
+      const lockAge = Date.now() - stats.mtimeMs;
+
+      if (lockAge < ROLLUP_LOCK_TIMEOUT_MS) {
+        // Lock is fresh - another process is running
+        return false;
+      }
+      // Lock is stale - previous process died, we can take over
+      log(`[Memory] Found stale rollup lock (${Math.round(lockAge / 1000)}s old), taking over`);
+    }
+
+    // Create lock file with our PID
+    fs.writeFileSync(ROLLUP_LOCK_FILE, `${process.pid}\n${new Date().toISOString()}`);
+    return true;
+  } catch (err) {
+    log(`[Memory] Failed to acquire rollup lock: ${err}`);
+    return false;
+  }
+}
+
+function releaseRollupLock(): void {
+  try {
+    if (fs.existsSync(ROLLUP_LOCK_FILE)) {
+      fs.unlinkSync(ROLLUP_LOCK_FILE);
+    }
+  } catch (err) {
+    log(`[Memory] Failed to release rollup lock: ${err}`);
+  }
+}
 
 // Extract a chunk from the beginning of the short-term buffer
 // Returns the path to the chunk file, or null if buffer is too small
@@ -720,12 +793,11 @@ async function checkAndTriggerRollup(): Promise<void> {
     return;
   }
 
-  if (rollupInProgress) {
-    log(`[Memory] Rollup already in progress, ${pendingChunks.length} chunks waiting.`);
+  // Try to acquire file-based lock (prevents concurrent rollups even across processes)
+  if (!acquireRollupLock()) {
+    log(`[Memory] Rollup already in progress (lock held), ${pendingChunks.length} chunks waiting.`);
     return;
   }
-
-  rollupInProgress = true;
 
   try {
     // Process chunks one at a time
@@ -740,7 +812,7 @@ async function checkAndTriggerRollup(): Promise<void> {
   } catch (err) {
     log(`[Memory] Rollup failed: ${err}`);
   } finally {
-    rollupInProgress = false;
+    releaseRollupLock();
   }
 }
 
@@ -802,6 +874,9 @@ DO NOT try to clear or modify the chunk file - the watcher handles cleanup.`;
   await waitForGlobalSlot(dummyEvent);
 
   return new Promise((resolve, reject) => {
+    // Refresh CLAUDE.md from SOUL.md + SYSTEM.md before each job
+    refreshClaudeMd();
+
     log(`[Memory] Starting rollup job ${jobId} for chunk ${path.basename(chunkFile)} (${chunkSizeKB}KB, ${lineCount} lines)`);
 
     const proc = spawn(
@@ -1053,6 +1128,9 @@ async function handleChannelEvent(
   const jobId = generateJobId();
 
   return new Promise((resolve, reject) => {
+    // Refresh CLAUDE.md from SOUL.md + SYSTEM.md before each job
+    refreshClaudeMd();
+
     log(`[Watcher] Spawning Claude with session ${sessionId} (mode: ${memoryMode}, ${useNewSession ? "new" : "resuming"}) [job: ${jobId}]`);
 
     const sessionArg = useNewSession
@@ -1559,6 +1637,9 @@ async function handleCronJob(job: CronJob): Promise<void> {
   const jobFileId = generateJobId();
 
   return new Promise((resolve, reject) => {
+    // Refresh CLAUDE.md from SOUL.md + SYSTEM.md before each job
+    refreshClaudeMd();
+
     log(`[Cron] Running job ${job.id}: ${job.description} [job: ${jobFileId}]`);
 
     const sessionArg = isNewSession

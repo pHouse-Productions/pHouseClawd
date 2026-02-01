@@ -207,7 +207,7 @@ git clone https://github.com/pHouse-Productions/pHouseMcp.git
 
    **Note:** We use `node dist/mcp.js` (compiled JavaScript) instead of `npx tsx src/mcp.ts` for faster MCP startup times.
 
-   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `google-calendar`, `google-chat`, `discord`, `image-gen`, `finnhub`, `cron`, `memory`, `pdf`
+   Available servers: `telegram`, `gmail`, `google-docs`, `google-sheets`, `google-drive`, `google-places`, `google-calendar`, `google-chat`, `discord`, `image-gen`, `finnhub`, `cron`, `pdf`
 
 ### Recommended Third-Party MCP
 
@@ -255,7 +255,7 @@ You can also tell Claude directly what you want:
 
 | File | Purpose |
 |------|---------|
-| `CLAUDE.md` | Your assistant's personality, your info, preferences |
+| `SOUL.md` | Your assistant's personality, your info, preferences (CLAUDE.md is auto-generated) |
 | `config/cron.json` | Scheduled tasks and reminders |
 | `config/channels.json` | Enabled communication channels |
 | `config/email-security.json` | Trusted email addresses for auto-reply |

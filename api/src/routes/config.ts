@@ -16,7 +16,8 @@ const EMAIL_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/email-security.jso
 const GCHAT_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/gchat-security.json");
 const DISCORD_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/discord-security.json");
 const MEMORY_SETTINGS_CONFIG = path.join(PROJECT_ROOT, "config/memory-settings.json");
-const CLAUDE_MD_FILE = path.join(PROJECT_ROOT, "CLAUDE.md");
+const SOUL_MD_FILE = path.join(PROJECT_ROOT, "SOUL.md");
+const SYSTEM_MD_FILE = path.join(PROJECT_ROOT, "SYSTEM.md");
 
 // Config schema - keys exposed in UI
 export const CONFIG_SCHEMA = {
@@ -123,7 +124,7 @@ Or if you have an existing token JSON, paste it here.`,
 router.get("/", async (_req: Request, res: Response) => {
   try {
     // Read all config sources
-    const [envVars, apiVars, googleToken, googleCredentials, channelsConfig, emailSecurityConfig, gchatSecurityConfig, discordSecurityConfig, memorySettingsConfig, claudeMd] = await Promise.all([
+    const [envVars, apiVars, googleToken, googleCredentials, channelsConfig, emailSecurityConfig, gchatSecurityConfig, discordSecurityConfig, memorySettingsConfig, soulMd, systemMd] = await Promise.all([
       parseEnvFile(MCP_ENV_FILE),
       parseEnvFile(API_ENV_FILE),
       readJsonFile(GOOGLE_TOKEN_FILE),
@@ -133,7 +134,8 @@ router.get("/", async (_req: Request, res: Response) => {
       readJsonFile(GCHAT_SECURITY_CONFIG),
       readJsonFile(DISCORD_SECURITY_CONFIG),
       readJsonFile(MEMORY_SETTINGS_CONFIG),
-      fs.readFile(CLAUDE_MD_FILE, "utf-8").catch(() => ""),
+      fs.readFile(SOUL_MD_FILE, "utf-8").catch(() => ""),
+      fs.readFile(SYSTEM_MD_FILE, "utf-8").catch(() => ""),
     ]);
 
     // Helper to mask sensitive values
@@ -259,7 +261,8 @@ router.get("/", async (_req: Request, res: Response) => {
         chunkSizeBytes: 25600,
         longTermFileMaxSize: 30720,
       },
-      claudeMd: claudeMd,
+      soulMd: soulMd,
+      systemMd: systemMd,
     });
   } catch (error) {
     res.status(500).json({ error: String(error) });
@@ -378,9 +381,9 @@ router.post("/", async (req: Request, res: Response) => {
         return;
       }
 
-      case "claudeMd": {
-        await fs.writeFile(CLAUDE_MD_FILE, data, "utf-8");
-        res.json({ success: true, message: "CLAUDE.md updated." });
+      case "soulMd": {
+        await fs.writeFile(SOUL_MD_FILE, data, "utf-8");
+        res.json({ success: true, message: "SOUL.md updated." });
         return;
       }
 

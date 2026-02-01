@@ -5,7 +5,7 @@ import MarkdownRenderer from "@/components/MarkdownRenderer";
 
 const COLLAPSE_THRESHOLD = 300; // characters - keeps the page scannable
 
-function CollapsibleContent({ content, type }: { content: string; type: string }) {
+function CollapsibleContent({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false);
   const shouldCollapse = content.length > COLLAPSE_THRESHOLD;
 
@@ -144,7 +144,7 @@ export default function JobDetail() {
       {job.fullPrompt && (
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
           <h3 className="text-sm font-semibold text-white mb-2">Full Prompt</h3>
-          <CollapsibleContent content={job.fullPrompt} type="prompt" />
+          <CollapsibleContent content={job.fullPrompt} />
         </div>
       )}
 
@@ -166,7 +166,7 @@ export default function JobDetail() {
             {step.type === "text" ? (
               <MarkdownRenderer content={step.content} />
             ) : (
-              <CollapsibleContent content={step.content} type={step.type} />
+              <CollapsibleContent content={step.content} />
             )}
           </div>
         ))}
