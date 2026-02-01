@@ -62,9 +62,11 @@ leads/
 # Client websites (each has its own GitHub repo)
 websites/
 
-# Claude skills (personal workflows, but allow seed templates)
-.claude/
-!seed/.claude/
+# Claude directory - ignore personal skills but track shared ones
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/update/
 
 # Runtime files
 listeners/gchat/last_message_time.txt
