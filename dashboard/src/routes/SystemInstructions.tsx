@@ -50,7 +50,7 @@ export default function SystemInstructions() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-2xl font-bold text-white">System Instructions</h2>
-          <p className="text-zinc-500 mt-1">View Vito's configuration and personality</p>
+          <p className="text-zinc-500 mt-1">View assistant configuration and personality</p>
         </div>
         <Link
           to="/config/soul-md"

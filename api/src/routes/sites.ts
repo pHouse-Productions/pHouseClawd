@@ -45,8 +45,8 @@ async function loadSitesConfig(): Promise<SitesConfig> {
   } catch {
     // Return defaults if config doesn't exist
     return {
-      baseDomain: "mike-vito.rl-quests.com",
-      staticSitesDir: "/home/ubuntu/hosted-sites",
+      baseDomain: "localhost",
+      staticSitesDir: "./hosted-sites",
       apps: {},
     };
   }

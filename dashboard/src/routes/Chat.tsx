@@ -151,7 +151,7 @@ export default function Chat() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Chat</h2>
-          <p className="text-zinc-500 text-sm">Talk to Vito via dashboard</p>
+          <p className="text-zinc-500 text-sm">Chat with your assistant</p>
         </div>
         <button
           onClick={handleClear}

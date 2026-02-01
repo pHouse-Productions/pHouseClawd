@@ -63,7 +63,7 @@ export default function SoulMd() {
             ← Back to System
           </Link>
           <h2 className="text-2xl font-bold text-white">SOUL.md</h2>
-          <p className="text-zinc-500 mt-1">Vito's personality and preferences</p>
+          <p className="text-zinc-500 mt-1">Assistant personality and preferences</p>
         </div>
         <button
           onClick={handleSave}

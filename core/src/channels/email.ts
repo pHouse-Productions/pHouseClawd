@@ -32,6 +32,7 @@ const EMAIL_SECURITY_CONFIG_FILE = path.join(PROJECT_ROOT, "config/email-securit
 interface EmailSecurityConfig {
   trustedEmailAddresses: string[];
   forwardUntrustedTo: string[];
+  botEmailAddress?: string; // The Gmail account the bot sends from (to skip self-sent emails)
 }
 
 function loadEmailSecurityConfig(): EmailSecurityConfig {
@@ -50,12 +51,13 @@ function loadEmailSecurityConfig(): EmailSecurityConfig {
       return {
         trustedEmailAddresses: config.trustedEmailAddresses || [],
         forwardUntrustedTo: forwardTo,
+        botEmailAddress: config.botEmailAddress || "",
       };
     }
   } catch (err) {
     log(`[EmailChannel] Failed to load security config: ${err}`);
   }
-  return { trustedEmailAddresses: [], forwardUntrustedTo: [] };
+  return { trustedEmailAddresses: [], forwardUntrustedTo: [], botEmailAddress: "" };
 }
 
 function isTrustedSender(fromAddress: string): boolean {
@@ -430,8 +432,9 @@ export const EmailChannel: Channel & ChannelDefinition = {
             const headers = detail.data.payload?.headers || [];
             const from = getHeader(headers, "From");
 
-            // Skip emails from ourselves
-            if (from.includes("vitobot87@gmail.com")) {
+            // Skip emails from ourselves (the bot's Gmail account)
+            const securityConfig = loadEmailSecurityConfig();
+            if (securityConfig.botEmailAddress && from.toLowerCase().includes(securityConfig.botEmailAddress.toLowerCase())) {
               continue;
             }
 

@@ -1,4 +1,4 @@
-const AUTH_KEY = "vito_dash_auth";
+const AUTH_KEY = "phouse_dash_auth";
 
 export function getStoredPassword(): string | null {
   return localStorage.getItem(AUTH_KEY);
