@@ -15,10 +15,10 @@ Update pHouseClawd and pHouseMcp to the latest versions, then review the seed te
 
 ## Repositories to Update
 
-### 1. pHouseMcp (`/home/ubuntu/pHouseMcp`)
+### 1. pHouseMcp (`../pHouseMcp` relative to pHouseClawd)
 The MCP servers repository with all the integrations (Telegram, Gmail, Calendar, etc.)
 
-### 2. pHouseClawd (`/home/ubuntu/pHouseClawd`)
+### 2. pHouseClawd (this repo)
 The main assistant framework with the watcher, dashboard, and configuration.
 
 ## Instructions
@@ -28,7 +28,7 @@ The main assistant framework with the watcher, dashboard, and configuration.
 Before doing anything else, copy the latest seed version of this skill to your local skills directory:
 
 ```bash
-cp /home/ubuntu/pHouseClawd/seed/.claude/skills/update/SKILL.md /home/ubuntu/pHouseClawd/.claude/skills/update/SKILL.md
+cp seed/.claude/skills/update/SKILL.md .claude/skills/update/SKILL.md
 ```
 
 **Why this matters:** The update skill itself gets improved over time. By copying the seed version first, you ensure you're following the latest update procedure, not an outdated one.
@@ -36,71 +36,90 @@ cp /home/ubuntu/pHouseClawd/seed/.claude/skills/update/SKILL.md /home/ubuntu/pHo
 ### Step 1: Update pHouseMcp
 
 ```bash
-cd /home/ubuntu/pHouseMcp && git fetch origin && git pull origin main
+cd ../pHouseMcp && git fetch origin && git pull origin main
 ```
 
 Check what changed:
 ```bash
-cd /home/ubuntu/pHouseMcp && git log --oneline -5
+cd ../pHouseMcp && git log --oneline -5
 ```
 
-If there are new changes, run `npm install` to update dependencies, then rebuild the TypeScript:
+If there are new changes, rebuild:
 ```bash
-cd /home/ubuntu/pHouseMcp && npm install && npm run build
+cd ../pHouseMcp && npm install && npm run build
+```
+
+Then restart the MCP servers:
+```bash
+sudo systemctl restart mcp-servers
 ```
 
 ### Step 2: Update pHouseClawd
 
 ```bash
-cd /home/ubuntu/pHouseClawd && git fetch origin && git pull origin main
+git fetch origin && git pull origin main
 ```
 
 Check what changed:
 ```bash
-cd /home/ubuntu/pHouseClawd && git log --oneline -5
+git log --oneline -5
 ```
 
-### Step 3: Install Dependencies (REQUIRED)
+### Step 3: Install Dependencies & Build (REQUIRED)
 
-**ALWAYS run npm install in all directories after pulling, even if you don't think it's needed.** This prevents "module not found" errors from new dependencies.
+**ALWAYS run these after pulling, even if you don't think it's needed.** This prevents "module not found" errors from new dependencies.
 
 ```bash
-# Core dependencies
-cd /home/ubuntu/pHouseClawd/core && npm install
+# Core watcher
+cd core && npm install && cd ..
 
-# Dashboard dependencies (frequently causes issues if skipped!)
-cd /home/ubuntu/pHouseClawd/dashboard && npm install
+# API server
+cd api && npm install && npm run build && cd ..
 
-# Listener dependencies (if any listeners have package.json)
-cd /home/ubuntu/pHouseClawd/listeners/telegram && npm install
-cd /home/ubuntu/pHouseClawd/listeners/discord && npm install
+# Dashboard
+cd dashboard && npm install && npm run build && cd ..
 ```
 
-**Why this matters:** New packages are added regularly. Skipping npm install is the #1 cause of "update worked but everything is broken" issues.
+**Why this matters:** New packages are added regularly. Skipping npm install/build is the #1 cause of "update worked but everything is broken" issues.
 
 ### Step 4: Review the Seed Files
 
-Read `/home/ubuntu/pHouseClawd/seed/CLAUDE.md` and compare it to your current CLAUDE.md.
+Read `seed/CLAUDE.md` and compare it to your current setup:
+- **SOUL.md** - Your personality/preferences (instance-specific, not updated)
+- **SYSTEM.md** - Technical reference (tracked, may have updates)
 
 Look for:
-- **New sections** that don't exist in your CLAUDE.md
+- **New sections** in SYSTEM.md
 - **Updated protocols** or best practices
 - **New safety rules** you should follow
-- **New skills** or tools documented
+- **New skills** documented
 
-If you find new sections that should be in your CLAUDE.md, offer to add them.
+If SYSTEM.md has significant changes, let the owner know what's new.
 
-### Step 5: Report Summary
+### Step 5: Restart Services
+
+After updating code, restart the affected services:
+
+```bash
+# If watcher code changed
+pm2 restart watcher
+
+# If dashboard/API code changed
+pm2 restart dashboard-api
+```
+
+### Step 6: Report Summary
 
 Tell the owner:
 - What commits were pulled (if any) for each repo
-- What new features or instructions you found in the template
+- What new features or instructions you found
 - Any new MCP servers or tools available
-- Whether they need to restart the assistant for changes to take effect
+- Which services were restarted
 
 ## Important Notes
 
-- **NEVER run `restart.sh` yourself** - Always ask the owner to restart if needed
+- **Use PM2 for restarts** - `pm2 restart watcher` or `pm2 restart dashboard-api`
+- **MCP servers use systemd** - `sudo systemctl restart mcp-servers`
 - If there are merge conflicts, stop and ask for help
-- If npm install fails, report the error
+- If npm install/build fails, report the error
 - This skill ensures you stay current with the latest capabilities and protocols
