@@ -606,13 +606,27 @@ function releaseGlobalSlot(): void {
   }
 }
 
-// Short-term memory logging
-function logToShortTermMemory(channel: string, direction: "in" | "out", content: string): void {
-  const timestamp = getLocalTimestamp();
-  // Collapse multi-line content to single line for cleaner buffer
-  const singleLine = content.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
-  const line = `[${timestamp}] [${channel}] [${direction}] ${singleLine}\n`;
-  fs.appendFileSync(SHORT_TERM_MEMORY_FILE, line);
+// Short-term memory logging - JSONL format
+interface ShortTermMemoryEntry {
+  ts: string;      // ISO timestamp
+  ch: string;      // channel name
+  dir: "in" | "out";
+  from?: string;   // sender (for incoming messages)
+  msg: string;     // message content
+}
+
+function logToShortTermMemory(channel: string, direction: "in" | "out", content: string, from?: string): void {
+  const entry: ShortTermMemoryEntry = {
+    ts: new Date().toISOString(),
+    ch: channel,
+    dir: direction,
+    // Preserve newlines - JSON.stringify will escape them as \n which is JSONL-safe
+    msg: content.trim(),
+  };
+  if (from) {
+    entry.from = from;
+  }
+  fs.appendFileSync(SHORT_TERM_MEMORY_FILE, JSON.stringify(entry) + "\n");
 }
 
 function getShortTermMemorySize(): number {
@@ -653,22 +667,108 @@ Use \`read_short_term\` to see it, or \`search_memory\` to search across all mem
   }
 }
 
+// Format a JSONL entry to human-readable format
+function formatMemoryEntry(entry: ShortTermMemoryEntry): string {
+  const time = new Date(entry.ts).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+  if (entry.dir === "in") {
+    return `${entry.from || "Unknown"}: ${entry.msg}`;
+  } else {
+    return `Assistant: ${entry.msg}`;
+  }
+}
+
+// Parse JSONL buffer into structured entries
+function parseMemoryBuffer(): ShortTermMemoryEntry[] {
+  if (!fs.existsSync(SHORT_TERM_MEMORY_FILE)) {
+    return [];
+  }
+  const content = fs.readFileSync(SHORT_TERM_MEMORY_FILE, "utf-8");
+  const lines = content.trim().split("\n").filter(l => l.trim());
+  const entries: ShortTermMemoryEntry[] = [];
+
+  for (const line of lines) {
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      // Skip malformed lines (legacy format)
+    }
+  }
+  return entries;
+}
+
 function getRecentTranscriptContext(sessionKey?: string): string {
   try {
-    const memoryInfo = getMemoryFilesInfo();
     const contextLines = sessionKey ? getTranscriptLines(sessionKey) : DEFAULT_TRANSCRIPT_LINES;
 
-    if (!fs.existsSync(SHORT_TERM_MEMORY_FILE)) {
-      return memoryInfo ? `\n\n${memoryInfo}` : "";
+    const entries = parseMemoryBuffer();
+    if (entries.length === 0) {
+      return "";
     }
-    const content = fs.readFileSync(SHORT_TERM_MEMORY_FILE, "utf-8");
-    const lines = content.trim().split("\n").filter(l => l.trim());
-    const recentLines = lines.slice(-contextLines);
-    if (recentLines.length === 0) {
-      return memoryInfo ? `\n\n${memoryInfo}` : "";
+
+    // Get the most recent entries
+    const recentEntries = entries.slice(-contextLines);
+
+    // Extract current channel from sessionKey (e.g., "telegram" from "telegram-5473044160")
+    const currentChannel = sessionKey?.split("-")[0] || "";
+
+    // Separate entries by channel
+    let currentChannelEntries = recentEntries.filter(e => e.ch === currentChannel);
+    const otherChannelEntries = recentEntries.filter(e => e.ch !== currentChannel);
+
+    // Exclude the most recent incoming message on current channel - that's the message being processed
+    // and will already appear in the prompt
+    if (currentChannelEntries.length > 0) {
+      const lastEntry = currentChannelEntries[currentChannelEntries.length - 1];
+      if (lastEntry.dir === "in") {
+        currentChannelEntries = currentChannelEntries.slice(0, -1);
+      }
     }
-    return `\n\n${memoryInfo}--- RECENT CONVERSATION HISTORY (from all channels) ---\n${recentLines.join("\n")}\n--- END HISTORY ---\n\n`;
-  } catch {
+
+    // Build context in logical order:
+    // 1. Other channels first (background context)
+    // 2. This conversation (immediate context, right before the new message)
+    let context = "\n\n## Recent Context\n\n";
+
+    // Other channels first - show recent messages for background awareness
+    const otherChannelsByName = new Map<string, ShortTermMemoryEntry[]>();
+    for (const entry of otherChannelEntries) {
+      if (!otherChannelsByName.has(entry.ch)) {
+        otherChannelsByName.set(entry.ch, []);
+      }
+      otherChannelsByName.get(entry.ch)!.push(entry);
+    }
+
+    if (otherChannelsByName.size > 0) {
+      context += "### Other Channels\n";
+      for (const [ch, channelEntries] of otherChannelsByName) {
+        const channelName = ch.charAt(0).toUpperCase() + ch.slice(1);
+        // Show last few messages from this channel (up to 5)
+        const recentFromChannel = channelEntries.slice(-5);
+        context += `**${channelName}** (${channelEntries.length} messages):\n`;
+        for (const entry of recentFromChannel) {
+          context += formatMemoryEntry(entry) + "\n";
+        }
+        context += "\n";
+      }
+    }
+
+    // Current channel transcript - full history, right before the new message
+    if (currentChannelEntries.length > 0) {
+      const channelName = currentChannel.charAt(0).toUpperCase() + currentChannel.slice(1);
+      context += `### This Conversation (${channelName})\n`;
+      for (const entry of currentChannelEntries) {
+        context += formatMemoryEntry(entry) + "\n";
+      }
+      context += "\n";
+    }
+
+    return context;
+  } catch (err) {
+    log(`[Memory] Error building transcript context: ${err}`);
     return "";
   }
 }
@@ -816,6 +916,41 @@ async function checkAndTriggerRollup(): Promise<void> {
   }
 }
 
+// Convert JSONL chunk to human-readable format for rollup
+function convertChunkToReadable(chunkContent: string): string {
+  const lines = chunkContent.trim().split("\n").filter(l => l.trim());
+  const readable: string[] = [];
+  let currentDate = "";
+
+  for (const line of lines) {
+    try {
+      const entry: ShortTermMemoryEntry = JSON.parse(line);
+      const date = new Date(entry.ts);
+      const dateStr = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      const timeStr = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+
+      // Add date header when day changes
+      if (dateStr !== currentDate) {
+        if (currentDate) readable.push("");
+        readable.push(`## ${dateStr}`);
+        currentDate = dateStr;
+      }
+
+      const channelName = entry.ch.charAt(0).toUpperCase() + entry.ch.slice(1);
+      if (entry.dir === "in") {
+        readable.push(`[${timeStr}] [${channelName}] ${entry.from || "Unknown"}: ${entry.msg}`);
+      } else {
+        readable.push(`[${timeStr}] [${channelName}] Assistant: ${entry.msg}`);
+      }
+    } catch {
+      // Legacy format line - include as-is
+      readable.push(line);
+    }
+  }
+
+  return readable.join("\n");
+}
+
 async function performRollup(chunkFile: string): Promise<void> {
   const chunkContent = fs.readFileSync(chunkFile, "utf-8");
   if (!chunkContent.trim()) {
@@ -823,15 +958,21 @@ async function performRollup(chunkFile: string): Promise<void> {
     return;
   }
 
-  const chunkSizeKB = Math.round(chunkContent.length / 1024);
-  const lineCount = chunkContent.trim().split("\n").length;
+  // Convert JSONL to readable format for the LLM
+  const readableContent = convertChunkToReadable(chunkContent);
+  const chunkSizeKB = Math.round(readableContent.length / 1024);
+  const lineCount = readableContent.trim().split("\n").length;
+
+  // Write readable version to a temp file for the rollup job
+  const readableChunkFile = chunkFile.replace(".txt", "-readable.txt");
+  fs.writeFileSync(readableChunkFile, readableContent);
 
   // Lightweight prompt - points to file instead of embedding content
   const rollupPrompt = `MEMORY ROLLUP TASK
 
 A chunk of conversation history needs to be processed into long-term memory.
 
-**Chunk file:** ${chunkFile}
+**Chunk file:** ${readableChunkFile}
 **Size:** ${chunkSizeKB}KB (${lineCount} lines)
 
 ## Instructions
@@ -858,7 +999,7 @@ A chunk of conversation history needs to be processed into long-term memory.
 
 ## Example Workflow
 
-1. Read chunk: \`Read tool on ${chunkFile}\`
+1. Read chunk: \`Read tool on ${readableChunkFile}\`
 2. Check files: \`recall()\` → see journal.md, projects.md exist
 3. Read current: \`recall(file="journal.md")\` → see what's there
 4. Identify NEW info in chunk that's not already in journal.md
@@ -1025,30 +1166,35 @@ async function handleChannelEvent(
   log(`[Watcher] Processing event from ${channel.name}: ${sessionKey}`);
   log(`[Watcher] Prompt: ${prompt.slice(0, 100)}...`);
 
-  // Log incoming event to short-term memory
-  // Format depends on channel type
-  let incomingContent = "";
+  // Log incoming event to short-term memory (JSONL format)
+  let incomingFrom: string | undefined;
+  let incomingMsg = "";
+
   if (channel.name === "telegram") {
-    const from = payload.from || "Unknown";
+    incomingFrom = payload.from || "Unknown";
     if (payload.type === "message") {
-      incomingContent = `${from}: ${payload.text}`;
+      incomingMsg = payload.text;
     } else if (payload.type === "photo") {
-      incomingContent = `${from}: [Photo] ${payload.caption || ""}`;
+      incomingMsg = `[Photo] ${payload.caption || ""}`;
     } else if (payload.type === "document") {
-      incomingContent = `${from}: [Document: ${payload.file_name}] ${payload.caption || ""}`;
+      incomingMsg = `[Document: ${payload.file_name}] ${payload.caption || ""}`;
     }
   } else if (channel.name === "email") {
-    incomingContent = `From: ${payload.from}\nSubject: ${payload.subject}\n\n${payload.body}`;
+    incomingFrom = payload.from;
+    incomingMsg = `Subject: ${payload.subject} | ${payload.body}`;
   } else if (channel.name === "gchat") {
-    const from = payload.sender_name || "Unknown";
-    incomingContent = `${from}: ${payload.text}`;
+    incomingFrom = payload.sender_name || "Unknown";
+    incomingMsg = payload.text;
   } else if (channel.name === "discord") {
-    const from = payload.from || "Unknown";
-    incomingContent = `${from}: ${payload.text}`;
+    incomingFrom = payload.from || "Unknown";
+    incomingMsg = payload.text;
+  } else if (channel.name === "dashboard") {
+    incomingFrom = "User";
+    incomingMsg = payload.text || payload.message || "";
   }
 
-  if (incomingContent) {
-    logToShortTermMemory(channel.name, "in", incomingContent);
+  if (incomingMsg) {
+    logToShortTermMemory(channel.name, "in", incomingMsg, incomingFrom);
   }
 
   // Note: All commands (/stop, /new, /memory, /queue, /restart) are now handled with priority
@@ -1226,7 +1372,7 @@ async function handleChannelEvent(
 
       // Log outgoing response to short-term memory
       if (outgoingTextBuffer.trim()) {
-        logToShortTermMemory(channel.name, "out", `Assistant: ${outgoingTextBuffer.trim()}`);
+        logToShortTermMemory(channel.name, "out", outgoingTextBuffer.trim());
         // Check if we need to trigger auto-rollup (async, don't block)
         checkAndTriggerRollup().catch(err => log(`[Memory] Rollup error: ${err}`));
       }
@@ -1710,8 +1856,8 @@ async function handleCronJob(job: CronJob): Promise<void> {
 
       // Log cron output to short-term memory
       if (handler.textBuffer.trim()) {
-        logToShortTermMemory("cron", "in", `[${job.description}] ${job.prompt}`);
-        logToShortTermMemory("cron", "out", `Assistant: ${handler.textBuffer.trim()}`);
+        logToShortTermMemory("cron", "in", job.prompt, job.description);
+        logToShortTermMemory("cron", "out", handler.textBuffer.trim());
         checkAndTriggerRollup().catch(err => log(`[Memory] Rollup error: ${err}`));
       }
 

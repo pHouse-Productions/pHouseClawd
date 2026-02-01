@@ -59,7 +59,7 @@ Users can send these commands in any channel:
 Two-tier system for persistent context across sessions.
 
 ### Long-term Memory
-**Location:** `/home/ubuntu/pHouseMcp/memory/long-term/`
+**Location:** `/home/ubuntu/pHouseClawd/memory/long-term/`
 
 Persistent markdown files for important information:
 - `journal.md` - Daily notes, decisions, events
@@ -71,11 +71,11 @@ Persistent markdown files for important information:
 Use standard Read/Edit/Write tools to access these files. Create new files as needed for new categories.
 
 ### Short-term Memory
-**Location:** `/home/ubuntu/pHouseMcp/memory/short-term/buffer.md`
+**Location:** `/home/ubuntu/pHouseClawd/memory/short-term/buffer.txt`
 
-Rolling conversation buffer - recent messages across all channels. The watcher appends every message here. Use this to catch up on recent context when starting a new session.
+Rolling conversation buffer in JSONL format - recent messages across all channels. The watcher appends every message here with structured metadata (timestamp, channel, direction, sender).
 
-If the buffer gets too large (100KB+), the watcher auto-truncates it. You can also manually trim by editing the file to keep only recent entries.
+When the buffer exceeds the threshold (~50KB), the watcher extracts a chunk to `memory/rollup-pending/` and spawns a background job to roll up important information to long-term memory.
 
 ### Best Practices
 - Read relevant long-term files at session start for context

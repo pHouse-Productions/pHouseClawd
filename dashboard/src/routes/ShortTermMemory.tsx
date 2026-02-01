@@ -1,18 +1,97 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { authFetch } from "@/lib/auth";
+import MarkdownRenderer from "@/components/MarkdownRenderer";
 
 const SIZE_THRESHOLD = 100 * 1024; // 100KB
+
+interface MemoryEntry {
+  ts: string;
+  ch: string;
+  dir: "in" | "out";
+  from?: string;
+  msg: string;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
+function parseJSONL(content: string): MemoryEntry[] {
+  const lines = content.trim().split("\n").filter(l => l.trim());
+  const entries: MemoryEntry[] = [];
+
+  for (const line of lines) {
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      // Skip malformed lines
+    }
+  }
+  return entries;
+}
+
+function formatTime(ts: string): string {
+  return new Date(ts).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function formatDate(ts: string): string {
+  return new Date(ts).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function ChannelBadge({ channel }: { channel: string }) {
+  const colors: Record<string, string> = {
+    telegram: "bg-blue-500/20 text-blue-400",
+    discord: "bg-indigo-500/20 text-indigo-400",
+    dashboard: "bg-zinc-500/20 text-zinc-400",
+    email: "bg-green-500/20 text-green-400",
+    gchat: "bg-yellow-500/20 text-yellow-400",
+    cron: "bg-purple-500/20 text-purple-400",
+  };
+
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${colors[channel] || "bg-zinc-700 text-zinc-300"}`}>
+      {channel}
+    </span>
+  );
+}
+
+function MessageEntry({ entry }: { entry: MemoryEntry }) {
+  const isIncoming = entry.dir === "in";
+
+  return (
+    <div className={`py-2 px-3 rounded-lg ${isIncoming ? "bg-zinc-800/50" : "bg-zinc-800/30 border-l-2 border-zinc-600"}`}>
+      <div className="flex items-center gap-2 mb-1">
+        <ChannelBadge channel={entry.ch} />
+        <span className="text-xs text-zinc-500">{formatTime(entry.ts)}</span>
+        {isIncoming && entry.from && (
+          <span className="text-xs font-medium text-zinc-300">{entry.from}</span>
+        )}
+        {!isIncoming && (
+          <span className="text-xs font-medium text-emerald-400">Assistant</span>
+        )}
+      </div>
+      <div className="text-sm">
+        <MarkdownRenderer content={entry.msg} />
+      </div>
+    </div>
+  );
+}
+
 export default function ShortTermMemory() {
   const [content, setContent] = useState("");
   const [size, setSize] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<string>("all");
 
   useEffect(() => {
     const fetchShortTerm = async () => {
@@ -31,6 +110,22 @@ export default function ShortTermMemory() {
     };
     fetchShortTerm();
   }, []);
+
+  const entries = parseJSONL(content);
+  const channels = [...new Set(entries.map(e => e.ch))];
+  const filteredEntries = filter === "all"
+    ? entries
+    : entries.filter(e => e.ch === filter);
+
+  // Group entries by date
+  const groupedByDate: Record<string, MemoryEntry[]> = {};
+  for (const entry of filteredEntries) {
+    const date = formatDate(entry.ts);
+    if (!groupedByDate[date]) {
+      groupedByDate[date] = [];
+    }
+    groupedByDate[date].push(entry);
+  }
 
   const needsRollup = size >= SIZE_THRESHOLD;
 
@@ -63,7 +158,7 @@ export default function ShortTermMemory() {
         </Link>
         <div>
           <h2 className="text-xl font-bold text-white">Short-term Buffer</h2>
-          <p className="text-zinc-500 text-sm">Conversation logs awaiting roll-up</p>
+          <p className="text-zinc-500 text-sm">{entries.length} messages across {channels.length} channels</p>
         </div>
       </div>
 
@@ -94,23 +189,55 @@ export default function ShortTermMemory() {
         </div>
       </div>
 
-      {/* Content */}
-      <div className="bg-zinc-900 rounded-lg border border-zinc-800">
-        <div className="px-4 py-3 border-b border-zinc-800">
-          <h3 className="text-sm font-semibold text-white">Buffer Content</h3>
+      {/* Filter */}
+      {channels.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-zinc-500">Filter:</span>
+          <button
+            onClick={() => setFilter("all")}
+            className={`px-2 py-1 rounded text-xs font-medium transition ${
+              filter === "all"
+                ? "bg-white text-black"
+                : "bg-zinc-800 text-zinc-400 hover:text-white"
+            }`}
+          >
+            All
+          </button>
+          {channels.map(ch => (
+            <button
+              key={ch}
+              onClick={() => setFilter(ch)}
+              className={`px-2 py-1 rounded text-xs font-medium transition ${
+                filter === ch
+                  ? "bg-white text-black"
+                  : "bg-zinc-800 text-zinc-400 hover:text-white"
+              }`}
+            >
+              {ch}
+            </button>
+          ))}
         </div>
-        <div className="p-4">
-          {content ? (
-            <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono break-words">
-              {content}
-            </pre>
-          ) : (
-            <p className="text-zinc-500 text-center py-8">
-              Short-term memory is empty
-            </p>
-          )}
+      )}
+
+      {/* Content grouped by date */}
+      {Object.entries(groupedByDate).reverse().map(([date, dateEntries]) => (
+        <div key={date} className="bg-zinc-900 rounded-lg border border-zinc-800">
+          <div className="px-4 py-3 border-b border-zinc-800">
+            <h3 className="text-sm font-semibold text-white">{date}</h3>
+          </div>
+          <div className="p-3 space-y-2">
+            {dateEntries.map((entry, i) => (
+              <MessageEntry key={`${entry.ts}-${i}`} entry={entry} />
+            ))}
+          </div>
         </div>
-      </div>
+      ))}
+
+      {entries.length === 0 && (
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-8 text-center">
+          <p className="text-zinc-500">Short-term memory is empty</p>
+        </div>
+      )}
     </div>
   );
 }

@@ -98,10 +98,15 @@ function log(message: string): void {
   fs.appendFile(LOG_FILE, line).catch(() => {});
 }
 
-function logToShortTermMemory(direction: "in" | "out", content: string): void {
-  const timestamp = getLocalTimestamp();
-  const line = `[${timestamp}] [dashboard] [${direction}] ${content}\n`;
-  fs.appendFile(SHORT_TERM_MEMORY_FILE, line).catch(() => {});
+function logToShortTermMemory(direction: "in" | "out", content: string, from?: string): void {
+  const entry = {
+    ts: new Date().toISOString(),
+    ch: "dashboard",
+    dir: direction,
+    ...(from && { from }),
+    msg: content.replace(/\n+/g, " ").replace(/\s+/g, " ").trim(),
+  };
+  fs.appendFile(SHORT_TERM_MEMORY_FILE, JSON.stringify(entry) + "\n").catch(() => {});
 }
 
 async function loadQueueData(): Promise<QueueData> {
@@ -304,7 +309,7 @@ router.post("/", upload.array("files"), async (req: Request, res: Response) => {
     const attachmentNote = attachments.length > 0
       ? ` [${attachments.length} attachment(s): ${attachments.map(a => a.name).join(", ")}]`
       : "";
-    logToShortTermMemory("in", `User: ${message}${attachmentNote}`);
+    logToShortTermMemory("in", `${message}${attachmentNote}`, "User");
 
     // Add to queue for watcher to process
     const queueData = await loadQueueData();
