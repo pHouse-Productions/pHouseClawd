@@ -24,6 +24,9 @@ import gchatRouter from "./routes/gchat.js";
 import watcherFixRouter from "./routes/watcher-fix.js";
 import systemRouter from "./routes/system.js";
 import cronRouter from "./routes/cron.js";
+import sitesRouter from "./routes/sites.js";
+import processesRouter from "./routes/processes.js";
+import leadsRouter from "./routes/leads.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -68,6 +71,9 @@ app.use("/api/gchat", authMiddleware, gchatRouter);
 app.use("/api/watcher/fix", authMiddleware, watcherFixRouter);
 app.use("/api/system", authMiddleware, systemRouter);
 app.use("/api/cron", authMiddleware, cronRouter);
+app.use("/api/sites", authMiddleware, sitesRouter);
+app.use("/api/processes", authMiddleware, processesRouter);
+app.use("/api/leads", authMiddleware, leadsRouter);
 
 // Error handling
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

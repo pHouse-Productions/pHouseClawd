@@ -144,7 +144,23 @@ class DiscordStreamHandler implements StreamHandler {
     // Track all chunks to prevent echo loops
     chunks.forEach(chunk => trackSentMessage(chunk));
 
-    // Send chunks with delay to maintain order
+    // Try to use the existing Discord client for ordered delivery
+    if (this.discordClient) {
+      try {
+        const channel = await this.discordClient.channels.fetch(this.channelId);
+        if (channel && (channel instanceof TextChannel || channel instanceof DMChannel || channel instanceof NewsChannel)) {
+          // Send chunks sequentially - awaiting each ensures order
+          for (const chunk of chunks) {
+            await channel.send(chunk);
+          }
+          return;
+        }
+      } catch (err) {
+        log(`[DiscordChannel] Failed to send via client, falling back to subprocess: ${err}`);
+      }
+    }
+
+    // Fallback: spawn subprocesses (but these may arrive out of order)
     for (let i = 0; i < chunks.length; i++) {
       if (i > 0) await new Promise(r => setTimeout(r, 500));
       try {

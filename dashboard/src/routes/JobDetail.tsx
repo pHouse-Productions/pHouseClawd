@@ -103,7 +103,7 @@ export default function JobDetail() {
         )}
       </div>
 
-      <div className="flex items-center gap-4 text-sm text-zinc-400">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-zinc-400">
         <span className="px-2 py-1 bg-zinc-800 rounded">{job.status}</span>
         <span>{job.toolCount} tools</span>
         {job.cost && <span>${job.cost.toFixed(4)}</span>}
@@ -113,7 +113,9 @@ export default function JobDetail() {
       {job.fullPrompt && (
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
           <h3 className="text-sm font-semibold text-white mb-2">Full Prompt</h3>
-          <pre className="text-sm text-zinc-400 whitespace-pre-wrap">{job.fullPrompt}</pre>
+          <div className="overflow-x-auto">
+            <pre className="text-sm text-zinc-400 whitespace-pre-wrap break-words">{job.fullPrompt}</pre>
+          </div>
         </div>
       )}
 
@@ -135,7 +137,9 @@ export default function JobDetail() {
             {step.type === "text" ? (
               <MarkdownRenderer content={step.content} />
             ) : (
-              <pre className="text-sm text-zinc-400 whitespace-pre-wrap overflow-x-auto">{step.content}</pre>
+              <div className="overflow-x-auto">
+                <pre className="text-sm text-zinc-400 whitespace-pre-wrap break-words">{step.content}</pre>
+              </div>
             )}
           </div>
         ))}

@@ -84,8 +84,8 @@ export default function Logs() {
         ))}
       </div>
 
-      <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4 max-h-[60vh] overflow-auto">
-        <pre className="text-sm text-zinc-300 font-mono">
+      <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
+        <pre className="text-sm text-zinc-300 font-mono whitespace-pre-wrap break-words">
           {content.length > 0 ? content.join("\n") : "No log content"}
         </pre>
       </div>

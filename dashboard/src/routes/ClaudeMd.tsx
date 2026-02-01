@@ -56,8 +56,8 @@ export default function ClaudeMd() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-[calc(100vh-5.5rem)] md:h-[calc(100vh-3rem)]">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <Link to="/config" className="text-zinc-400 hover:text-white text-sm">
             ← Back to Config
@@ -76,7 +76,7 @@ export default function ClaudeMd() {
 
       {message && (
         <div
-          className={`p-3 rounded-lg ${
+          className={`p-3 rounded-lg mb-4 ${
             message.type === "success"
               ? "bg-green-600/20 text-green-400"
               : "bg-red-600/20 text-red-400"
@@ -89,7 +89,7 @@ export default function ClaudeMd() {
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        className="w-full h-[60vh] bg-zinc-900 border border-zinc-800 rounded-lg p-4 text-zinc-100 font-mono text-sm resize-none focus:outline-none focus:border-zinc-700"
+        className="w-full flex-1 min-h-0 bg-zinc-900 border border-zinc-800 rounded-lg p-4 text-zinc-100 font-mono text-sm resize-none focus:outline-none focus:border-zinc-700"
         placeholder="# CLAUDE.md content..."
       />
     </div>

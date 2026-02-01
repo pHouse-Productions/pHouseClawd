@@ -187,153 +187,138 @@ function SessionSettingsPanel({
     <div className="mt-4 pt-4 border-t border-zinc-700">
       <label className="text-zinc-400 text-xs font-medium block mb-3">Session Settings</label>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="space-y-4">
         {/* Memory Mode */}
-        <div>
-          <label className="text-zinc-500 text-xs block mb-2">Memory Mode</label>
-          <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <label className="text-zinc-500 text-xs w-28 shrink-0">Memory Mode</label>
+          <div className="flex gap-1">
             <button
               onClick={() => onSaveSessionSetting("memoryMode", sessionKey, "session")}
-              className={`px-3 py-1.5 text-sm rounded ${
+              className={`px-2.5 py-1 text-xs rounded ${
                 memoryMode === "session"
                   ? "bg-green-600 text-white"
                   : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
               }`}
+              title="Full conversation context within session"
             >
               Session
             </button>
             <button
               onClick={() => onSaveSessionSetting("memoryMode", sessionKey, "transcript")}
-              className={`px-3 py-1.5 text-sm rounded ${
+              className={`px-2.5 py-1 text-xs rounded ${
                 memoryMode === "transcript"
                   ? "bg-green-600 text-white"
                   : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
               }`}
+              title="Each message is fresh but sees recent history"
             >
-              Transcript
+              Transcrpt
             </button>
           </div>
-          <p className="text-zinc-500 text-xs mt-1">
-            {memoryMode === "session"
-              ? "Full conversation context within session"
-              : "Each message is fresh but sees recent history"}
-          </p>
         </div>
 
         {/* Queue Mode */}
-        <div>
-          <label className="text-zinc-500 text-xs block mb-2">Queue Mode</label>
-          <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <label className="text-zinc-500 text-xs w-28 shrink-0">Queue Mode</label>
+          <div className="flex gap-1">
             <button
               onClick={() => onSaveSessionSetting("queueMode", sessionKey, "interrupt")}
-              className={`px-3 py-1.5 text-sm rounded ${
+              className={`px-2.5 py-1 text-xs rounded ${
                 queueMode === "interrupt"
                   ? "bg-green-600 text-white"
                   : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
               }`}
+              title="New messages interrupt current job"
             >
               Interrupt
             </button>
             <button
               onClick={() => onSaveSessionSetting("queueMode", sessionKey, "queue")}
-              className={`px-3 py-1.5 text-sm rounded ${
+              className={`px-2.5 py-1 text-xs rounded ${
                 queueMode === "queue"
                   ? "bg-green-600 text-white"
                   : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
               }`}
+              title="Messages queue up in order"
             >
               Queue
             </button>
           </div>
-          <p className="text-zinc-500 text-xs mt-1">
-            {queueMode === "interrupt"
-              ? "New messages interrupt current job"
-              : "Messages queue up in order"}
-          </p>
         </div>
 
         {/* Response Style */}
-        <div>
-          <label className="text-zinc-500 text-xs block mb-2">Response Style</label>
-          <div className="flex gap-2 flex-wrap">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <label className="text-zinc-500 text-xs w-28 shrink-0">Response Style</label>
+          <div className="flex gap-1">
             <button
               onClick={() => onSaveSessionSetting("responseStyle", sessionKey, "streaming")}
-              className={`px-3 py-1.5 text-sm rounded ${
+              className={`px-2.5 py-1 text-xs rounded ${
                 responseStyle === "streaming"
                   ? "bg-green-600 text-white"
                   : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
               }`}
+              title="Updates sent as they arrive"
             >
               Streaming
             </button>
             <button
               onClick={() => onSaveSessionSetting("responseStyle", sessionKey, "bundled")}
-              className={`px-3 py-1.5 text-sm rounded ${
+              className={`px-2.5 py-1 text-xs rounded ${
                 responseStyle === "bundled"
                   ? "bg-green-600 text-white"
                   : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
               }`}
+              title="All updates in one message when done"
             >
               Bundled
             </button>
             <button
               onClick={() => onSaveSessionSetting("responseStyle", sessionKey, "final")}
-              className={`px-3 py-1.5 text-sm rounded ${
+              className={`px-2.5 py-1 text-xs rounded ${
                 responseStyle === "final"
                   ? "bg-green-600 text-white"
                   : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
               }`}
+              title="Only the final response is sent"
             >
               Final
             </button>
           </div>
-          <p className="text-zinc-500 text-xs mt-1">
-            {responseStyle === "streaming"
-              ? "Updates sent as they arrive"
-              : responseStyle === "bundled"
-              ? "All updates in one message when done"
-              : "Only the final response is sent"}
-          </p>
         </div>
-      </div>
 
-      {/* Transcript Lines (only show when in transcript mode) */}
-      {memoryMode === "transcript" && (
-        <div className="mt-4">
-          <label className="text-zinc-500 text-xs block mb-2">
-            Transcript Context Lines
-          </label>
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min="10"
-              max="500"
-              step="10"
-              value={transcriptLines}
-              onChange={(e) => {
-                const value = parseInt(e.target.value, 10);
-                setSessionSettings({
-                  ...sessionSettings,
-                  transcriptLines: { ...sessionSettings.transcriptLines, [sessionKey]: value },
-                });
-              }}
-              onMouseUp={(e) => {
-                const value = parseInt((e.target as HTMLInputElement).value, 10);
-                onSaveSessionSetting("transcriptLines", sessionKey, value);
-              }}
-              onTouchEnd={(e) => {
-                const value = parseInt((e.target as HTMLInputElement).value, 10);
-                onSaveSessionSetting("transcriptLines", sessionKey, value);
-              }}
-              className="flex-1 h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-green-600"
-            />
-            <span className="text-white text-sm font-mono w-12 text-right">{transcriptLines}</span>
+        {/* Transcript Lines (only show when in transcript mode) */}
+        {memoryMode === "transcript" && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <label className="text-zinc-500 text-xs w-28 shrink-0">Context Lines</label>
+            <div className="flex items-center gap-2 flex-1">
+              <input
+                type="range"
+                min="10"
+                max="500"
+                step="10"
+                value={transcriptLines}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value, 10);
+                  setSessionSettings({
+                    ...sessionSettings,
+                    transcriptLines: { ...sessionSettings.transcriptLines, [sessionKey]: value },
+                  });
+                }}
+                onMouseUp={(e) => {
+                  const value = parseInt((e.target as HTMLInputElement).value, 10);
+                  onSaveSessionSetting("transcriptLines", sessionKey, value);
+                }}
+                onTouchEnd={(e) => {
+                  const value = parseInt((e.target as HTMLInputElement).value, 10);
+                  onSaveSessionSetting("transcriptLines", sessionKey, value);
+                }}
+                className="flex-1 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-green-600 max-w-48"
+              />
+              <span className="text-white text-xs font-mono w-8 text-right">{transcriptLines}</span>
+            </div>
           </div>
-          <p className="text-zinc-500 text-xs mt-1">
-            Number of recent messages included as context (10-500)
-          </p>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

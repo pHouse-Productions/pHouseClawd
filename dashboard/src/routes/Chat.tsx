@@ -25,15 +25,23 @@ export default function Chat() {
   const [isTyping, setIsTyping] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const shouldScrollRef = useRef<boolean>(false);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   };
 
   useEffect(() => {
-    scrollToBottom();
+    // Only auto-scroll when user just sent a message
+    if (shouldScrollRef.current) {
+      scrollToBottom();
+      shouldScrollRef.current = false;
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -75,6 +83,7 @@ export default function Chat() {
         setInput("");
         setFiles([]);
         if (fileInputRef.current) fileInputRef.current.value = "";
+        shouldScrollRef.current = true; // Scroll to bottom after sending
       }
     } catch (err) {
       console.error("Failed to send message:", err);
@@ -108,7 +117,7 @@ export default function Chat() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)]">
+    <div className="flex flex-col h-[calc(100vh-5.5rem)] md:h-[calc(100vh-3rem)]">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
@@ -123,52 +132,53 @@ export default function Chat() {
         </button>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-4 mb-4 bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-        {messages.length === 0 ? (
-          <div className="text-zinc-500 text-center py-8">No messages yet</div>
-        ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-            >
+      {/* Messages - flex-col-reverse so scroll position is preserved from bottom */}
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto flex flex-col-reverse mb-4 bg-zinc-900 rounded-lg border border-zinc-800 p-4">
+        <div className="space-y-4">
+          {messages.length === 0 ? (
+            <div className="text-zinc-500 text-center py-8">No messages yet</div>
+          ) : (
+            messages.map((msg) => (
               <div
-                className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                  msg.role === "user"
-                    ? "bg-blue-600 text-white"
-                    : "bg-zinc-800 text-zinc-100"
-                }`}
+                key={msg.id}
+                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                {msg.role === "assistant" ? (
-                  <MarkdownRenderer content={msg.content} />
-                ) : (
-                  <div className="whitespace-pre-wrap">{msg.content}</div>
-                )}
-                {msg.attachments && msg.attachments.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {msg.attachments.map((att, i) => (
-                      <div key={i} className="text-xs bg-zinc-700 px-2 py-1 rounded">
-                        {att.name}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {msg.status === "streaming" && (
-                  <span className="inline-block w-2 h-4 bg-zinc-400 animate-pulse ml-1" />
-                )}
+                <div
+                  className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                    msg.role === "user"
+                      ? "bg-blue-600 text-white"
+                      : "bg-zinc-800 text-zinc-100"
+                  }`}
+                >
+                  {msg.role === "assistant" ? (
+                    <MarkdownRenderer content={msg.content} />
+                  ) : (
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  )}
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {msg.attachments.map((att, i) => (
+                        <div key={i} className="text-xs bg-zinc-700 px-2 py-1 rounded">
+                          {att.name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {msg.status === "streaming" && (
+                    <span className="inline-block w-2 h-4 bg-zinc-400 animate-pulse ml-1" />
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+          {isTyping && (
+            <div className="flex justify-start">
+              <div className="bg-zinc-800 rounded-lg px-4 py-3 text-zinc-400">
+                <span className="animate-pulse">Typing...</span>
               </div>
             </div>
-          ))
-        )}
-        {isTyping && (
-          <div className="flex justify-start">
-            <div className="bg-zinc-800 rounded-lg px-4 py-3 text-zinc-400">
-              <span className="animate-pulse">Typing...</span>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
+          )}
+        </div>
       </div>
 
       {/* Input */}

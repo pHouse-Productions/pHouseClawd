@@ -418,9 +418,12 @@ Your assistant comes with a web dashboard at `http://localhost:3000` (or your se
 **Features:**
 - **Home** - System status and quick actions
 - **Jobs** - View running and completed tasks
+- **Processes** - PM2 process management (start/stop/restart, view logs, Claude/Node counts)
 - **Channels** - Monitor active communication channels
+- **Leads** - Sales lead tracker with Find Lead, Create Website, and Draft Email workflow buttons
+- **Sites** - View hosted client sites (auto-discovered from /home/ubuntu/hosted-sites/)
 - **Cron** - Manage scheduled tasks
-- **Memory** - View short-term and long-term memory
+- **Memory** - Short-term buffer with size indicator + long-term memory files
 - **MCP** - View available MCP servers and tools
 - **Logs** - Application logs for debugging
 - **Skills** - Available slash commands

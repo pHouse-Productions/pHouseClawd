@@ -5,10 +5,13 @@ import { useAuth } from "./AuthProvider";
 const navItems = [
   { href: "/", label: "Home", icon: "home" },
   { href: "/chat", label: "Chat", icon: "chat" },
+  { href: "/leads", label: "Leads", icon: "target" },
   { href: "/jobs", label: "Jobs", icon: "briefcase" },
   { href: "/memory", label: "Memory", icon: "brain" },
   { href: "/channels", label: "Channels", icon: "channels" },
   { href: "/skills", label: "Skills", icon: "bolt" },
+  { href: "/sites", label: "Sites", icon: "globe" },
+  { href: "/processes", label: "Processes", icon: "server" },
   { href: "/mcp", label: "MCP", icon: "plug" },
   { href: "/logs", label: "Logs", icon: "file-text" },
   { href: "/cron", label: "Cron", icon: "clock" },
@@ -65,6 +68,23 @@ const icons: Record<string, React.ReactNode> = {
   channels: (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+    </svg>
+  ),
+  globe: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+    </svg>
+  ),
+  server: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+    </svg>
+  ),
+  target: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10" strokeWidth={2} />
+      <circle cx="12" cy="12" r="6" strokeWidth={2} />
+      <circle cx="12" cy="12" r="2" strokeWidth={2} />
     </svg>
   ),
 };
