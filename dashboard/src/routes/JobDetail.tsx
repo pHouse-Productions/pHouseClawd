@@ -3,6 +3,37 @@ import { useParams, Link } from "react-router-dom";
 import { authFetch } from "@/lib/auth";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 
+const COLLAPSE_THRESHOLD = 300; // characters - keeps the page scannable
+
+function CollapsibleContent({ content, type }: { content: string; type: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const shouldCollapse = content.length > COLLAPSE_THRESHOLD;
+
+  if (!shouldCollapse) {
+    return (
+      <div className="overflow-x-auto">
+        <pre className="text-sm text-zinc-400 whitespace-pre-wrap break-words">{content}</pre>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="overflow-x-auto">
+        <pre className="text-sm text-zinc-400 whitespace-pre-wrap break-words">
+          {expanded ? content : content.slice(0, COLLAPSE_THRESHOLD) + "..."}
+        </pre>
+      </div>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="mt-2 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+      >
+        {expanded ? "Show less" : `Show more (${(content.length / 1024).toFixed(1)}KB)`}
+      </button>
+    </div>
+  );
+}
+
 interface JobStep {
   ts: string;
   type: "text" | "tool_call" | "tool_result" | "system" | "result" | "error";
@@ -113,9 +144,7 @@ export default function JobDetail() {
       {job.fullPrompt && (
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
           <h3 className="text-sm font-semibold text-white mb-2">Full Prompt</h3>
-          <div className="overflow-x-auto">
-            <pre className="text-sm text-zinc-400 whitespace-pre-wrap break-words">{job.fullPrompt}</pre>
-          </div>
+          <CollapsibleContent content={job.fullPrompt} type="prompt" />
         </div>
       )}
 
@@ -137,9 +166,7 @@ export default function JobDetail() {
             {step.type === "text" ? (
               <MarkdownRenderer content={step.content} />
             ) : (
-              <div className="overflow-x-auto">
-                <pre className="text-sm text-zinc-400 whitespace-pre-wrap break-words">{step.content}</pre>
-              </div>
+              <CollapsibleContent content={step.content} type={step.type} />
             )}
           </div>
         ))}

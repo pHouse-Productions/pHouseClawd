@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "@/lib/auth";
-import RestartButton from "@/components/RestartButton";
 
 interface SystemStats {
   uptime: string;
@@ -104,8 +103,6 @@ export default function Home() {
           <p className="text-zinc-500 mt-1">pHouseClawd overview</p>
         </div>
       </div>
-
-      <RestartButton />
 
       {/* Service Status */}
       {status && (

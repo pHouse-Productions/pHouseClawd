@@ -21,8 +21,6 @@ import Config from "@/routes/Config";
 import ClaudeMd from "@/routes/ClaudeMd";
 import Sites from "@/routes/Sites";
 import Processes from "@/routes/Processes";
-import Leads from "@/routes/Leads";
-import LeadDetail from "@/routes/LeadDetail";
 
 export default function App() {
   return (
@@ -50,8 +48,6 @@ export default function App() {
             <Route path="/config/claude-md" element={<ClaudeMd />} />
             <Route path="/sites" element={<Sites />} />
             <Route path="/processes" element={<Processes />} />
-            <Route path="/leads" element={<Leads />} />
-            <Route path="/leads/:id" element={<LeadDetail />} />
           </Routes>
         </main>
       </div>

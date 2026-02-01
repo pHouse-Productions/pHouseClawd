@@ -12,7 +12,6 @@ import logsRouter from "./routes/logs.js";
 import sessionsRouter from "./routes/sessions.js";
 import skillsRouter from "./routes/skills.js";
 import memoryRouter from "./routes/memory.js";
-import restartRouter from "./routes/restart.js";
 import jobsRouter from "./routes/jobs.js";
 import mcpRouter from "./routes/mcp.js";
 import configRouter from "./routes/config.js";
@@ -26,7 +25,6 @@ import systemRouter from "./routes/system.js";
 import cronRouter from "./routes/cron.js";
 import sitesRouter from "./routes/sites.js";
 import processesRouter from "./routes/processes.js";
-import leadsRouter from "./routes/leads.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,7 +58,6 @@ app.use("/api/logs", authMiddleware, logsRouter);
 app.use("/api/sessions", authMiddleware, sessionsRouter);
 app.use("/api/skills", authMiddleware, skillsRouter);
 app.use("/api/memory", authMiddleware, memoryRouter);
-app.use("/api/restart", authMiddleware, restartRouter);
 app.use("/api/jobs", authMiddleware, jobsRouter);
 app.use("/api/mcp", authMiddleware, mcpRouter);
 app.use("/api/config", authMiddleware, configRouter);
@@ -73,7 +70,6 @@ app.use("/api/system", authMiddleware, systemRouter);
 app.use("/api/cron", authMiddleware, cronRouter);
 app.use("/api/sites", authMiddleware, sitesRouter);
 app.use("/api/processes", authMiddleware, processesRouter);
-app.use("/api/leads", authMiddleware, leadsRouter);
 
 // Error handling
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

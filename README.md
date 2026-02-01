@@ -416,12 +416,11 @@ Press Ctrl+C to stop everything.
 Your assistant comes with a web dashboard at `http://localhost:3000` (or your server's IP on port 3000).
 
 **Features:**
-- **Home** - System status and quick actions
+- **Home** - System status overview
 - **Jobs** - View running and completed tasks
 - **Processes** - PM2 process management (start/stop/restart, view logs, Claude/Node counts)
 - **Channels** - Monitor active communication channels
-- **Leads** - Sales lead tracker with Find Lead, Create Website, and Draft Email workflow buttons
-- **Sites** - View hosted client sites (auto-discovered from /home/ubuntu/hosted-sites/)
+- **Sites** - Hosted sites and PM2 web apps with start/stop controls
 - **Cron** - Manage scheduled tasks
 - **Memory** - Short-term buffer with size indicator + long-term memory files
 - **MCP** - View available MCP servers and tools
