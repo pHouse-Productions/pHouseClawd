@@ -67,6 +67,7 @@ websites/
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/update/
+!.claude/skills/create-site/
 
 # Runtime files
 listeners/gchat/last_message_time.txt
