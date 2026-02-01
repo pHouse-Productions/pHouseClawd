@@ -3,7 +3,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import type { ChannelDefinition, ChannelEvent, ChannelEventHandler, StreamEvent } from "./types.js";
+import type { Channel, ChannelEvent, StreamHandler, ChannelDefinition, ChannelEventHandler, StreamEvent } from "./types.js";
 import { OutputHandler, type Verbosity } from "./output-handler.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -165,32 +165,42 @@ async function getMyEmail(auth: any): Promise<string | null> {
   }
 }
 
-// Handler for a single GChat event
-class GChatEventHandler implements ChannelEventHandler {
+// Stream handler for GChat - handles output back to space
+class GChatStreamHandler implements StreamHandler {
   private spaceName: string;
   private messageName: string;
-  private outputHandler: OutputHandler;
   private reactionName: string | null = null;
 
-  constructor(spaceName: string, messageName: string, verbosity: Verbosity = "streaming") {
+  constructor(spaceName: string, messageName: string) {
     this.spaceName = spaceName;
     this.messageName = messageName;
-
-    this.outputHandler = new OutputHandler(
-      { verbosity },
-      {
-        onSend: (message) => this.sendMessage(message),
-        // GChat uses emoji reactions as a working indicator (no typing API)
-        // onWorkStarted adds 👀 reaction - only needs to be called once
-        onWorkStarted: () => this.addWorkingReaction(),
-        onWorkComplete: () => this.removeWorkingReaction(),
-      }
-    );
   }
 
-  private async addWorkingReaction(): Promise<void> {
-    // Only add reaction once
-    if (this.reactionName || !this.messageName) return;
+  async relayMessage(text: string): Promise<void> {
+    if (!text || !text.trim()) return;
+
+    // Track this message to prevent echo loops
+    trackSentMessage(text);
+
+    try {
+      const proc = spawn("npx", ["tsx", SEND_SCRIPT, this.spaceName, text], {
+        cwd: PROJECT_ROOT,
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+      });
+      proc.unref();
+      log(`[GChatChannel] Sent to ${this.spaceName}: ${text.slice(0, 100)}${text.length > 100 ? "..." : ""}`);
+    } catch (err) {
+      log(`[GChatChannel] Failed to send: ${err}`);
+    }
+  }
+
+  // GChat has no typing indicator
+  async startTyping(): Promise<void> {}
+  async stopTyping(): Promise<void> {}
+
+  async startReaction(): Promise<void> {
+    if (!this.messageName) return;
 
     try {
       const auth = getOAuth2Client();
@@ -208,7 +218,7 @@ class GChatEventHandler implements ChannelEventHandler {
     }
   }
 
-  private async removeWorkingReaction(): Promise<void> {
+  async stopReaction(): Promise<void> {
     if (!this.reactionName) return;
 
     try {
@@ -223,6 +233,29 @@ class GChatEventHandler implements ChannelEventHandler {
       log(`[GChatChannel] Failed to remove working reaction: ${err}`);
     }
   }
+}
+
+// Legacy handler wrapper for backwards compatibility with watcher
+// TODO: Remove after watcher migration
+class GChatEventHandler implements ChannelEventHandler {
+  private streamHandler: GChatStreamHandler;
+  private outputHandler: OutputHandler;
+
+  constructor(spaceName: string, messageName: string, verbosity: Verbosity = "streaming") {
+    this.streamHandler = new GChatStreamHandler(spaceName, messageName);
+    this.outputHandler = new OutputHandler(
+      { verbosity },
+      { onSend: (message) => this.streamHandler.relayMessage(message) }
+    );
+  }
+
+  async onWorkStarted(): Promise<void> {
+    await this.streamHandler.startReaction();
+  }
+
+  async onWorkComplete(): Promise<void> {
+    await this.streamHandler.stopReaction();
+  }
 
   onStreamEvent(event: StreamEvent): void {
     this.outputHandler.onStreamEvent(event);
@@ -230,34 +263,20 @@ class GChatEventHandler implements ChannelEventHandler {
 
   onComplete(code: number): void {
     this.outputHandler.onComplete(code);
-    log(`[GChatChannel] Complete for space ${this.spaceName}, code ${code}`);
-  }
-
-  private sendMessage(message: string): void {
-    if (!message || !message.trim()) return;
-
-    // Track this message to prevent echo loops
-    trackSentMessage(message);
-
-    try {
-      const proc = spawn("npx", ["tsx", SEND_SCRIPT, this.spaceName, message], {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
-      });
-      proc.unref();
-      log(`[GChatChannel] Sent to ${this.spaceName}: ${message.slice(0, 100)}${message.length > 100 ? "..." : ""}`);
-    } catch (err) {
-      log(`[GChatChannel] Failed to send: ${err}`);
-    }
   }
 }
 
 // Google Chat channel definition
-export const GChatChannel: ChannelDefinition = {
+export const GChatChannel: Channel & ChannelDefinition = {
   name: "gchat",
   concurrency: "session",
 
+  // New interface: listen()
+  async listen(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
+    return this.startListener(onEvent);
+  },
+
+  // Legacy interface: startListener()
   async startListener(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
     const auth = getOAuth2Client();
     const chat = google.chat({ version: "v1", auth });
@@ -456,7 +475,6 @@ export const GChatChannel: ChannelDefinition = {
                   text,
                   message_name: msgName,
                   downloaded_files: downloadedFiles,
-                  verbosity: "streaming" as Verbosity,
                 },
                 message: {
                   text,
@@ -503,6 +521,12 @@ export const GChatChannel: ChannelDefinition = {
     };
   },
 
+  // New interface: createStreamHandler()
+  createStreamHandler(event: ChannelEvent): StreamHandler {
+    return new GChatStreamHandler(event.payload.space_name, event.payload.message_name);
+  },
+
+  // Legacy interface: createHandler()
   createHandler(event: ChannelEvent): ChannelEventHandler {
     const verbosity = event.payload.verbosity || "streaming";
     return new GChatEventHandler(event.payload.space_name, event.payload.message_name, verbosity);
@@ -513,6 +537,12 @@ export const GChatChannel: ChannelDefinition = {
     return `gchat-${payload.space_name.replace(/\//g, "-")}`;
   },
 
+  // New interface: getCustomPrompt()
+  getCustomPrompt(): string {
+    return this.getChannelContext!();
+  },
+
+  // Legacy interface: getChannelContext()
   getChannelContext(): string {
     return `[Channel: Google Chat]
 - To react to messages: Use mcp__google-chat__add_reaction with the message ID from this prompt

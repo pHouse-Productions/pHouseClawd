@@ -4,55 +4,27 @@ export type Verbosity = "streaming" | "bundled" | "progress" | "final";
 
 export interface OutputHandlerConfig {
   verbosity?: Verbosity;
-  flushIntervalMs?: number;
-  minCharsToFlush?: number;
 }
 
 export interface OutputHandlerCallbacks {
   onSend: (message: string) => void;
-  /** Called when work starts and periodically while working. Platform implements however it can (typing indicator, emoji reaction, etc.) */
-  onWorkStarted?: () => void;
-  /** Called when work is complete. Platform clears its working indicator. */
-  onWorkComplete?: () => void;
 }
 
-const DEFAULT_FLUSH_INTERVAL_MS = 2000;
-const DEFAULT_MIN_CHARS_TO_FLUSH = 50;
-
 /**
- * Shared output handler for managing text buffering and flushing
- * across all chat channels. Handles streaming, bundled, progress, and final modes.
+ * Simple output handler - no buffering, no timers.
+ * - streaming: send each text chunk immediately
+ * - bundled/final: accumulate everything, send at the end
+ * - progress: send tool notifications only
  */
 export class OutputHandler {
   private verbosity: Verbosity;
-  private flushIntervalMs: number;
-  private minCharsToFlush: number;
   private callbacks: OutputHandlerCallbacks;
-
   private textBuffer: string = "";
-  private lastFlush: number = Date.now();
-  private flushTimer: NodeJS.Timeout | null = null;
   private isComplete: boolean = false;
-  private workingInterval: NodeJS.Timeout | null = null;
 
   constructor(config: OutputHandlerConfig, callbacks: OutputHandlerCallbacks) {
     this.verbosity = config.verbosity || "streaming";
-    this.flushIntervalMs = config.flushIntervalMs || DEFAULT_FLUSH_INTERVAL_MS;
-    this.minCharsToFlush = config.minCharsToFlush || DEFAULT_MIN_CHARS_TO_FLUSH;
     this.callbacks = callbacks;
-
-    // Start working indicator if we have one
-    // Progress mode doesn't need it since it only sends tool notifications
-    if (this.callbacks.onWorkStarted && this.verbosity !== "progress") {
-      this.callbacks.onWorkStarted();
-      // Keep working indicator alive every 4 seconds
-      // Each platform implements this however they can (typing indicator, emoji reaction, etc.)
-      this.workingInterval = setInterval(() => {
-        if (!this.isComplete) {
-          this.callbacks.onWorkStarted?.();
-        }
-      }, 4000);
-    }
   }
 
   /**
@@ -69,10 +41,10 @@ export class OutputHandler {
 
     if (text) {
       if (this.verbosity === "streaming") {
-        this.bufferText(text);
+        // Send immediately - no buffering
+        this.callbacks.onSend(text);
       } else {
-        // bundled or final - just accumulate
-        // Add spacing between turns for readability
+        // bundled or final - accumulate
         if (isNewTurn && this.textBuffer.trim()) {
           this.textBuffer += "\n\n";
         }
@@ -92,21 +64,7 @@ export class OutputHandler {
     if (this.isComplete) return;
     this.isComplete = true;
 
-    // Clear any pending timers
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
-
-    if (this.workingInterval) {
-      clearInterval(this.workingInterval);
-      this.workingInterval = null;
-    }
-
-    // Clear working indicator
-    this.callbacks.onWorkComplete?.();
-
-    // Send any remaining buffered text
+    // Send any accumulated text (bundled/final modes)
     if (this.textBuffer.trim()) {
       this.callbacks.onSend(this.textBuffer.trim());
       this.textBuffer = "";
@@ -159,37 +117,5 @@ export class OutputHandler {
     }
 
     return result;
-  }
-
-  /**
-   * Buffer text and flush when appropriate (streaming mode)
-   */
-  private bufferText(text: string): void {
-    this.textBuffer += text;
-
-    const timeSinceFlush = Date.now() - this.lastFlush;
-    if (this.textBuffer.length >= this.minCharsToFlush || timeSinceFlush > this.flushIntervalMs) {
-      this.flush();
-    } else if (!this.flushTimer) {
-      this.flushTimer = setTimeout(() => this.flush(), this.flushIntervalMs);
-    }
-  }
-
-  /**
-   * Flush the buffer and send the text
-   */
-  private flush(): void {
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
-
-    const text = this.textBuffer.trim();
-    if (text) {
-      this.callbacks.onSend(text);
-      // Add spacing after each flush for readability in bundled messages
-      this.textBuffer = "\n\n";
-      this.lastFlush = Date.now();
-    }
   }
 }

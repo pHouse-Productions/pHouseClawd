@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { getStoredPassword, setStoredPassword, clearStoredPassword } from "@/lib/auth";
 

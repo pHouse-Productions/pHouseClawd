@@ -1,35 +1,33 @@
 #!/bin/bash
 
-# Start just the dashboard
+# Start the dashboard API server (Express on port 3100)
+# The frontend is now static files served by Caddy
 
 cd "$(dirname "$0")"
 
-# Check if already running on port 3000
-if fuser 3000/tcp > /dev/null 2>&1; then
-    echo "Dashboard is already running on port 3000."
+# Check if already running on port 3100
+if lsof -ti:3100 > /dev/null 2>&1; then
+    echo "API server is already running on port 3100."
     exit 1
 fi
 
-echo "Building dashboard..."
-cd dashboard && npm run build && cd ..
+echo "Starting API server..."
 
-echo "Starting dashboard..."
-
-cd dashboard
-nohup npm run start -- -p 3000 > ../logs/dashboard.log 2>&1 &
-DASHBOARD_PID=$!
+cd api
+nohup node dist/index.js > ../logs/api.log 2>&1 &
+API_PID=$!
 cd ..
 
-# Wait for it to actually start (Next.js takes a moment)
-echo "Waiting for dashboard to start..."
-for i in {1..30}; do
-    if fuser 3000/tcp > /dev/null 2>&1; then
-        echo "Dashboard started (PID: $DASHBOARD_PID)"
-        echo "Dashboard: http://localhost:3000"
+# Wait for it to start
+echo "Waiting for API server to start..."
+for i in {1..10}; do
+    if lsof -ti:3100 > /dev/null 2>&1; then
+        echo "API server started (PID: $API_PID)"
+        echo "Dashboard: https://mike-vito.rl-quests.com"
         exit 0
     fi
     sleep 1
 done
 
-echo "Dashboard failed to start within 30 seconds. Check logs/dashboard.log"
+echo "API server failed to start within 10 seconds. Check logs/api.log"
 exit 1

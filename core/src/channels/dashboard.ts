@@ -1,8 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import type { ChannelDefinition, ChannelEvent, ChannelEventHandler, StreamEvent } from "./types.js";
-import type { Verbosity } from "./output-handler.js";
+import type { Channel, ChannelEvent, StreamHandler, ChannelDefinition, ChannelEventHandler, StreamEvent } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,7 +92,38 @@ function appendEvent(event: ChatEvent): void {
   fs.appendFileSync(CHAT_FILE, line);
 }
 
+// Stream handler for Dashboard - writes to JSONL file for UI consumption
+class DashboardStreamHandler implements StreamHandler {
+  private currentMessageId: string;
+  private turns: string[] = [];
+  private currentTurnText: string = "";
+
+  constructor(messageId: string) {
+    this.currentMessageId = messageId;
+  }
+
+  async relayMessage(text: string): Promise<void> {
+    if (!text || !text.trim()) return;
+
+    // Dashboard doesn't split messages - it writes to JSONL
+    appendEvent({
+      ts: new Date().toISOString(),
+      type: "assistant",
+      content: text,
+      status: "streaming",
+      messageId: this.currentMessageId,
+    });
+  }
+
+  // Dashboard has no typing indicator or reactions
+  async startTyping(): Promise<void> {}
+  async stopTyping(): Promise<void> {}
+  async startReaction(): Promise<void> {}
+  async stopReaction(): Promise<void> {}
+}
+
 // Handler for a single dashboard event
+// Dashboard needs special handling since it tracks turn state for proper multi-turn display
 class DashboardEventHandler implements ChannelEventHandler {
   private currentMessageId: string;
   private turns: string[] = [];  // Each turn's final text
@@ -239,10 +269,16 @@ class DashboardEventHandler implements ChannelEventHandler {
 }
 
 // Dashboard channel definition
-export const DashboardChannel: ChannelDefinition = {
+export const DashboardChannel: Channel & ChannelDefinition = {
   name: "dashboard",
   concurrency: "session",
 
+  // New interface: listen()
+  async listen(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
+    return this.startListener(onEvent);
+  },
+
+  // Legacy interface: startListener()
   async startListener(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
     let running = true;
 
@@ -293,7 +329,6 @@ export const DashboardChannel: ChannelDefinition = {
                 assistantMessageId,
                 content: msg.content,
                 attachments: msg.attachments,
-                verbosity: "streaming" as Verbosity,
               },
               message: {
                 text: msg.content,
@@ -322,6 +357,12 @@ export const DashboardChannel: ChannelDefinition = {
     };
   },
 
+  // New interface: createStreamHandler()
+  createStreamHandler(event: ChannelEvent): StreamHandler {
+    return new DashboardStreamHandler(event.payload.assistantMessageId);
+  },
+
+  // Legacy interface: createHandler()
   createHandler(event: ChannelEvent): ChannelEventHandler {
     return new DashboardEventHandler(event.payload.assistantMessageId);
   },
@@ -330,6 +371,12 @@ export const DashboardChannel: ChannelDefinition = {
     return `dashboard-${payload.userId}`;
   },
 
+  // New interface: getCustomPrompt()
+  getCustomPrompt(): string {
+    return this.getChannelContext!();
+  },
+
+  // Legacy interface: getChannelContext()
   getChannelContext(): string {
     return `[Channel: Dashboard]
 - This is a web-based chat from the dashboard

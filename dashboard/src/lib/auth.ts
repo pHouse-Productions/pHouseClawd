@@ -1,7 +1,6 @@
 const AUTH_KEY = "vito_dash_auth";
 
 export function getStoredPassword(): string | null {
-  if (typeof window === "undefined") return null;
   return localStorage.getItem(AUTH_KEY);
 }
 
@@ -20,7 +19,6 @@ export async function authFetch(
   const password = getStoredPassword();
 
   // For FormData, we need to let the browser set the Content-Type with boundary
-  // So we only add headers, don't replace them completely
   const headers = new Headers(options.headers);
 
   if (password) {

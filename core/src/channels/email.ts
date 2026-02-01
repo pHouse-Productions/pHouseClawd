@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { marked } from "marked";
-import type { ChannelDefinition, ChannelEvent, ChannelEventHandler, StreamEvent } from "./types.js";
+import type { Channel, ChannelEvent, StreamHandler, ChannelDefinition, ChannelEventHandler, StreamEvent } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -262,7 +262,56 @@ export interface EmailConfig {
   messageId?: string;
 }
 
-// Handler for a single email event
+// Stream handler for Email - sends replies
+class EmailStreamHandler implements StreamHandler {
+  private config: EmailConfig;
+
+  constructor(config: EmailConfig) {
+    this.config = config;
+  }
+
+  async relayMessage(text: string): Promise<void> {
+    if (!text || !text.trim()) return;
+
+    const { replyTo, subject, threadId, messageId } = this.config;
+    const replySubject = subject.startsWith("Re:") ? subject : `Re: ${subject}`;
+
+    // Convert markdown to HTML for nicer formatting
+    const htmlBody = marked.parse(text) as string;
+
+    const args = [
+      "tsx",
+      path.join(PROJECT_ROOT, "listeners/gmail/send-reply.ts"),
+      replyTo,
+      replySubject,
+      text,
+      htmlBody,
+      threadId || "",
+      messageId || "",
+    ];
+
+    try {
+      const proc = spawn("npx", args, {
+        cwd: PROJECT_ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+      });
+      proc.unref();
+      log(`[EmailChannel] Sent reply to ${replyTo} (thread: ${threadId || "new"}): ${text.slice(0, 100)}${text.length > 100 ? "..." : ""}`);
+    } catch (err) {
+      log(`[EmailChannel] Failed to send: ${err}`);
+    }
+  }
+
+  // Email has no typing indicator or reactions
+  async startTyping(): Promise<void> {}
+  async stopTyping(): Promise<void> {}
+  async startReaction(): Promise<void> {}
+  async stopReaction(): Promise<void> {}
+}
+
+// Legacy handler wrapper for backwards compatibility with watcher
+// TODO: Remove after watcher migration
 class EmailEventHandler implements ChannelEventHandler {
   private config: EmailConfig;
   private textBuffer: string = "";
@@ -294,7 +343,8 @@ class EmailEventHandler implements ChannelEventHandler {
     this.isComplete = true;
 
     if (this.textBuffer.trim()) {
-      this.sendEmailReply(this.textBuffer.trim());
+      const streamHandler = new EmailStreamHandler(this.config);
+      streamHandler.relayMessage(this.textBuffer.trim());
     }
     log(`[EmailChannel] Complete for ${this.config.replyTo}, code ${code}`);
   }
@@ -318,46 +368,19 @@ class EmailEventHandler implements ChannelEventHandler {
     }
     return null;
   }
-
-  private sendEmailReply(body: string): void {
-    if (!body || !body.trim()) return;
-
-    const { replyTo, subject, threadId, messageId } = this.config;
-    const replySubject = subject.startsWith("Re:") ? subject : `Re: ${subject}`;
-
-    // Convert markdown to HTML for nicer formatting
-    const htmlBody = marked.parse(body) as string;
-
-    const args = [
-      "tsx",
-      path.join(PROJECT_ROOT, "listeners/gmail/send-reply.ts"),
-      replyTo,
-      replySubject,
-      body,
-      htmlBody,
-      threadId || "",
-      messageId || "",
-    ];
-
-    try {
-      const proc = spawn("npx", args, {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      });
-      proc.unref();
-      log(`[EmailChannel] Sent reply to ${replyTo} (thread: ${threadId || "new"}): ${body.slice(0, 100)}${body.length > 100 ? "..." : ""}`);
-    } catch (err) {
-      log(`[EmailChannel] Failed to send: ${err}`);
-    }
-  }
 }
 
 // Email channel definition
-export const EmailChannel: ChannelDefinition = {
+export const EmailChannel: Channel & ChannelDefinition = {
   name: "email",
   concurrency: "session",
 
+  // New interface: listen()
+  async listen(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
+    return this.startListener(onEvent);
+  },
+
+  // Legacy interface: startListener()
   async startListener(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
     const auth = getOAuth2Client();
     const gmail = google.gmail({ version: "v1", auth });
@@ -538,6 +561,18 @@ ${email.body}`;
     };
   },
 
+  // New interface: createStreamHandler()
+  createStreamHandler(event: ChannelEvent): StreamHandler {
+    const { from, subject, thread_id, message_id } = event.payload;
+    return new EmailStreamHandler({
+      replyTo: from,
+      subject,
+      threadId: thread_id,
+      messageId: message_id,
+    });
+  },
+
+  // Legacy interface: createHandler()
   createHandler(event: ChannelEvent): ChannelEventHandler {
     const { from, subject, thread_id, message_id } = event.payload;
     return new EmailEventHandler({
@@ -553,6 +588,12 @@ ${email.body}`;
     return `email-${payload.thread_id}`;
   },
 
+  // New interface: getCustomPrompt()
+  getCustomPrompt(): string {
+    return this.getChannelContext!();
+  },
+
+  // Legacy interface: getChannelContext()
   getChannelContext(): string {
     return `[Channel: Email]
 - Replies are sent automatically through the relay system - do NOT use send_email for replies

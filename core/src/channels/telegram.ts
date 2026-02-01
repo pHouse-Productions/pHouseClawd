@@ -4,7 +4,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as https from "https";
 import { fileURLToPath } from "url";
-import type { ChannelDefinition, ChannelEvent, ChannelEventHandler, StreamEvent } from "./types.js";
+import type { Channel, ChannelEvent, StreamHandler, ChannelDefinition, ChannelEventHandler, StreamEvent } from "./types.js";
 import { OutputHandler, type Verbosity } from "./output-handler.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,100 +59,42 @@ async function downloadFile(bot: Telegraf, fileId: string, destPath: string): Pr
   });
 }
 
-// Handler for a single Telegram event
-class TelegramEventHandler implements ChannelEventHandler {
+// Stream handler for Telegram - handles output back to chat
+class TelegramStreamHandler implements StreamHandler {
   private chatId: number;
   private messageId: number | null;
-  private outputHandler: OutputHandler;
-  private hasAddedReaction = false;
 
-  constructor(chatId: number, messageId: number | null, verbosity: Verbosity = "streaming") {
+  constructor(chatId: number, messageId: number | null) {
     this.chatId = chatId;
     this.messageId = messageId;
-
-    this.outputHandler = new OutputHandler(
-      { verbosity },
-      {
-        onSend: (message) => this.sendMessage(message),
-        // Telegram has both typing indicator AND reactions - we use both like Discord
-        onWorkStarted: () => {
-          this.sendTypingIndicator();
-          this.addWorkingReaction();
-        },
-        onWorkComplete: () => this.removeWorkingReaction(),
-      }
-    );
   }
 
-  onStreamEvent(event: StreamEvent): void {
-    this.outputHandler.onStreamEvent(event);
-  }
-
-  onComplete(code: number): void {
-    this.outputHandler.onComplete(code);
-    log(`[TelegramChannel] Complete for chat ${this.chatId}, code ${code}`);
-  }
-
-  private sendMessage(message: string): void {
-    if (!message || !message.trim()) return;
+  async relayMessage(text: string): Promise<void> {
+    if (!text || !text.trim()) return;
 
     // Telegram has a 4096 character limit - split long messages
-    const MAX_LENGTH = 4000; // Leave some margin
-    const chunks = this.splitMessage(message, MAX_LENGTH);
+    const MAX_LENGTH = 4000;
+    const chunks = this.splitMessage(text, MAX_LENGTH);
 
-    log(`[TelegramChannel] Sending ${message.length} chars in ${chunks.length} chunk(s) to ${this.chatId}`);
+    log(`[TelegramChannel] Sending ${text.length} chars in ${chunks.length} chunk(s) to ${this.chatId}`);
 
     // Send chunks with delay to maintain order
-    chunks.forEach((chunk, index) => {
-      setTimeout(() => {
-        try {
-          const proc = spawn("npx", ["tsx", SEND_SCRIPT, String(this.chatId), chunk], {
-            cwd: PROJECT_ROOT,
-            stdio: ["ignore", "ignore", "ignore"],
-            detached: true,
-          });
-          proc.unref();
-        } catch (err) {
-          log(`[TelegramChannel] Failed to send chunk: ${err}`);
-        }
-      }, index * 500); // 500ms between each chunk
-    });
-  }
-
-  private splitMessage(message: string, maxLength: number): string[] {
-    const chunks: string[] = [];
-
-    if (message.length <= maxLength) {
-      chunks.push(message);
-    } else {
-      // Split on paragraph breaks first, then by length
-      let remaining = message;
-      while (remaining.length > 0) {
-        if (remaining.length <= maxLength) {
-          chunks.push(remaining);
-          break;
-        }
-
-        // Try to split at a paragraph break
-        let splitIndex = remaining.lastIndexOf("\n\n", maxLength);
-        if (splitIndex === -1 || splitIndex < maxLength / 2) {
-          // No good paragraph break, try single newline
-          splitIndex = remaining.lastIndexOf("\n", maxLength);
-        }
-        if (splitIndex === -1 || splitIndex < maxLength / 2) {
-          // No good newline, just split at max length
-          splitIndex = maxLength;
-        }
-
-        chunks.push(remaining.slice(0, splitIndex));
-        remaining = remaining.slice(splitIndex).trimStart();
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 500));
+      try {
+        const proc = spawn("npx", ["tsx", SEND_SCRIPT, String(this.chatId), chunks[i]], {
+          cwd: PROJECT_ROOT,
+          stdio: ["ignore", "ignore", "ignore"],
+          detached: true,
+        });
+        proc.unref();
+      } catch (err) {
+        log(`[TelegramChannel] Failed to send chunk: ${err}`);
       }
     }
-
-    return chunks;
   }
 
-  private sendTypingIndicator(): void {
+  async startTyping(): Promise<void> {
     try {
       const proc = spawn("npx", ["tsx", TYPING_SCRIPT, String(this.chatId)], {
         cwd: PROJECT_ROOT,
@@ -165,9 +107,8 @@ class TelegramEventHandler implements ChannelEventHandler {
     }
   }
 
-  private addWorkingReaction(): void {
-    // Only add reaction once, and only if we have a message ID
-    if (this.hasAddedReaction || !this.messageId) return;
+  async startReaction(): Promise<void> {
+    if (!this.messageId) return;
 
     try {
       const proc = spawn("npx", ["tsx", ADD_REACTION_SCRIPT, String(this.chatId), String(this.messageId), "👀"], {
@@ -176,15 +117,14 @@ class TelegramEventHandler implements ChannelEventHandler {
         detached: true,
       });
       proc.unref();
-      this.hasAddedReaction = true;
       log(`[TelegramChannel] Added working reaction to ${this.messageId}`);
     } catch (err) {
       log(`[TelegramChannel] Failed to add reaction: ${err}`);
     }
   }
 
-  private removeWorkingReaction(): void {
-    if (!this.hasAddedReaction || !this.messageId) return;
+  async stopReaction(): Promise<void> {
+    if (!this.messageId) return;
 
     try {
       const proc = spawn("npx", ["tsx", REMOVE_REACTION_SCRIPT, String(this.chatId), String(this.messageId)], {
@@ -198,13 +138,97 @@ class TelegramEventHandler implements ChannelEventHandler {
       log(`[TelegramChannel] Failed to remove reaction: ${err}`);
     }
   }
+
+  private splitMessage(message: string, maxLength: number): string[] {
+    const chunks: string[] = [];
+
+    if (message.length <= maxLength) {
+      chunks.push(message);
+    } else {
+      let remaining = message;
+      while (remaining.length > 0) {
+        if (remaining.length <= maxLength) {
+          chunks.push(remaining);
+          break;
+        }
+
+        let splitIndex = remaining.lastIndexOf("\n\n", maxLength);
+        if (splitIndex === -1 || splitIndex < maxLength / 2) {
+          splitIndex = remaining.lastIndexOf("\n", maxLength);
+        }
+        if (splitIndex === -1 || splitIndex < maxLength / 2) {
+          splitIndex = maxLength;
+        }
+
+        chunks.push(remaining.slice(0, splitIndex));
+        remaining = remaining.slice(splitIndex).trimStart();
+      }
+    }
+
+    return chunks;
+  }
+}
+
+// Legacy handler wrapper for backwards compatibility with watcher
+// TODO: Remove after watcher migration
+class TelegramEventHandler implements ChannelEventHandler {
+  private streamHandler: TelegramStreamHandler;
+  private outputHandler: OutputHandler;
+  private typingInterval: NodeJS.Timeout | null = null;
+
+  constructor(chatId: number, messageId: number | null, verbosity: Verbosity = "streaming") {
+    this.streamHandler = new TelegramStreamHandler(chatId, messageId);
+    this.outputHandler = new OutputHandler(
+      { verbosity },
+      { onSend: (message) => this.streamHandler.relayMessage(message) }
+    );
+  }
+
+  onWorkStarted(): void {
+    // Send initial typing indicator
+    this.streamHandler.startTyping();
+    this.streamHandler.startReaction();
+
+    // Telegram typing indicator expires after ~5 seconds, so repeat every 4 seconds
+    this.typingInterval = setInterval(() => {
+      this.streamHandler.startTyping();
+    }, 4000);
+  }
+
+  onWorkComplete(): void {
+    // Stop the typing interval
+    if (this.typingInterval) {
+      clearInterval(this.typingInterval);
+      this.typingInterval = null;
+    }
+    this.streamHandler.stopReaction();
+  }
+
+  onStreamEvent(event: StreamEvent): void {
+    this.outputHandler.onStreamEvent(event);
+  }
+
+  onComplete(code: number): void {
+    // Make sure typing interval is stopped on completion too
+    if (this.typingInterval) {
+      clearInterval(this.typingInterval);
+      this.typingInterval = null;
+    }
+    this.outputHandler.onComplete(code);
+  }
 }
 
 // Telegram channel definition
-export const TelegramChannel: ChannelDefinition = {
+export const TelegramChannel: Channel & ChannelDefinition = {
   name: "telegram",
   concurrency: "session",
 
+  // New interface: listen()
+  async listen(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
+    return this.startListener(onEvent);
+  },
+
+  // Legacy interface: startListener()
   async startListener(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     if (!botToken) {
@@ -238,7 +262,6 @@ export const TelegramChannel: ChannelDefinition = {
             message_id: messageId,
             from,
             text,
-            verbosity: "streaming" as Verbosity,
           },
           message: {
             text,
@@ -284,7 +307,6 @@ export const TelegramChannel: ChannelDefinition = {
               from,
               caption,
               image_path: imagePath,
-              verbosity: "streaming" as Verbosity,
             },
             message: {
               text: caption,
@@ -335,7 +357,6 @@ export const TelegramChannel: ChannelDefinition = {
               file_path: filePath,
               file_name: originalName,
               mime_type: doc.mime_type || "application/octet-stream",
-              verbosity: "streaming" as Verbosity,
             },
             message: {
               text: caption,
@@ -365,6 +386,13 @@ export const TelegramChannel: ChannelDefinition = {
     };
   },
 
+  // New interface: createStreamHandler()
+  createStreamHandler(event: ChannelEvent): StreamHandler {
+    const messageId = event.payload.message_id || null;
+    return new TelegramStreamHandler(event.payload.chat_id, messageId);
+  },
+
+  // Legacy interface: createHandler()
   createHandler(event: ChannelEvent): ChannelEventHandler {
     const verbosity = event.payload.verbosity || "streaming";
     const messageId = event.payload.message_id || null;
@@ -375,6 +403,12 @@ export const TelegramChannel: ChannelDefinition = {
     return `telegram-${payload.chat_id}`;
   },
 
+  // New interface: getCustomPrompt()
+  getCustomPrompt(): string {
+    return this.getChannelContext!();
+  },
+
+  // Legacy interface: getChannelContext()
   getChannelContext(): string {
     return `[Channel: Telegram]
 - To send images: Use mcp__telegram__send_photo (renders inline in chat)

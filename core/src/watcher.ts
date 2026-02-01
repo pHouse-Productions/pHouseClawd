@@ -6,9 +6,11 @@ import { fileURLToPath } from "url";
 import { config } from "dotenv";
 import cron from "node-cron";
 import {
+  Channel,
   ChannelDefinition,
   ChannelEvent,
   ChannelEventHandler,
+  StreamHandler,
   ConcurrencyMode,
 } from "./channels/index.js";
 import { TelegramChannel } from "./channels/telegram.js";
@@ -58,12 +60,63 @@ if (!fs.existsSync(JOBS_DIR)) {
 // Short-term memory
 const SHORT_TERM_MEMORY_DIR = path.join(PROJECT_ROOT, "memory/short-term");
 const SHORT_TERM_MEMORY_FILE = path.join(SHORT_TERM_MEMORY_DIR, "buffer.txt");
-const SHORT_TERM_SIZE_THRESHOLD = 100 * 1024; // 100KB
-const SHORT_TERM_RETAIN_RATIO = 0.25; // Keep 25% of buffer after rollup
+const ROLLUP_PENDING_DIR = path.join(PROJECT_ROOT, "memory/rollup-pending");
 
-// Ensure short-term memory directory exists
+// Memory settings file
+const MEMORY_SETTINGS_FILE = path.join(PROJECT_ROOT, "config/memory-settings.json");
+
+// Memory config defaults (in bytes)
+const MEMORY_CONFIG_DEFAULTS = {
+  shortTermSizeThreshold: 50 * 1024,   // 50KB
+  chunkSizeBytes: 25 * 1024,           // 25KB
+  longTermFileMaxSize: 30 * 1024,      // 30KB
+};
+
+// Memory settings interface (matches memory-settings.json)
+interface MemorySettingsFile {
+  shortTermSizeThreshold: number;  // bytes
+  chunkSizeBytes: number;          // bytes
+  longTermFileMaxSize: number;     // bytes
+}
+
+// Get memory config from memory-settings.json (cached after first load)
+let memorySettingsCache: MemorySettingsFile | null = null;
+function getMemorySettings(): MemorySettingsFile {
+  if (memorySettingsCache) {
+    return memorySettingsCache;
+  }
+  try {
+    const loaded = JSON.parse(fs.readFileSync(MEMORY_SETTINGS_FILE, "utf-8")) as Partial<MemorySettingsFile>;
+    memorySettingsCache = {
+      shortTermSizeThreshold: loaded.shortTermSizeThreshold ?? MEMORY_CONFIG_DEFAULTS.shortTermSizeThreshold,
+      chunkSizeBytes: loaded.chunkSizeBytes ?? MEMORY_CONFIG_DEFAULTS.chunkSizeBytes,
+      longTermFileMaxSize: loaded.longTermFileMaxSize ?? MEMORY_CONFIG_DEFAULTS.longTermFileMaxSize,
+    };
+  } catch {
+    memorySettingsCache = { ...MEMORY_CONFIG_DEFAULTS };
+  }
+  return memorySettingsCache;
+}
+
+// Helper functions to get memory thresholds in bytes
+function getShortTermSizeThreshold(): number {
+  return getMemorySettings().shortTermSizeThreshold;
+}
+
+function getChunkSizeBytes(): number {
+  return getMemorySettings().chunkSizeBytes;
+}
+
+function getLongTermFileMaxSize(): number {
+  return getMemorySettings().longTermFileMaxSize;
+}
+
+// Ensure memory directories exist
 if (!fs.existsSync(SHORT_TERM_MEMORY_DIR)) {
   fs.mkdirSync(SHORT_TERM_MEMORY_DIR, { recursive: true });
+}
+if (!fs.existsSync(ROLLUP_PENDING_DIR)) {
+  fs.mkdirSync(ROLLUP_PENDING_DIR, { recursive: true });
 }
 
 // Dashboard chat file (for command responses)
@@ -122,8 +175,13 @@ interface ChannelConfig {
   enabled: boolean;
 }
 
+interface GlobalConfig {
+  maxConcurrentJobs?: number;  // Default: 2
+}
+
 interface ChannelsConfig {
   channels: Record<string, ChannelConfig>;
+  global?: GlobalConfig;
 }
 
 function loadChannelsConfig(): ChannelsConfig {
@@ -337,6 +395,10 @@ const eventQueues: Map<string, ChannelEvent[]> = new Map();
 // Mutex locks to prevent race conditions when checking/modifying activeSessions
 const sessionMutexes: Map<string, Promise<void>> = new Map();
 
+// Global job queue - wait when too many jobs are running
+const globalJobQueue: Array<{ resolve: () => void; event: ChannelEvent }> = [];
+let maxConcurrentJobs = 2; // Will be overwritten by config
+
 function log(message: string) {
   const timestamp = new Date().toISOString();
   const line = `[${timestamp}] ${message}\n`;
@@ -483,6 +545,32 @@ function getRunningJobForSession(sessionKey: string): string | null {
 // Export for API access
 export { killJob, getRunningJobId };
 
+// Global concurrency control
+function getRunningJobCount(): number {
+  return runningJobs.size;
+}
+
+async function waitForGlobalSlot(event: ChannelEvent): Promise<void> {
+  if (getRunningJobCount() < maxConcurrentJobs) {
+    return; // Slot available
+  }
+
+  log(`[Jobs] At capacity (${getRunningJobCount()}/${maxConcurrentJobs}). Queuing event from ${event.sessionKey}...`);
+
+  return new Promise((resolve) => {
+    globalJobQueue.push({ resolve, event });
+  });
+}
+
+function releaseGlobalSlot(): void {
+  // Check if anyone is waiting in the global queue
+  if (globalJobQueue.length > 0) {
+    const next = globalJobQueue.shift()!;
+    log(`[Jobs] Slot freed. Releasing queued event from ${next.event.sessionKey} (${globalJobQueue.length} still waiting)`);
+    next.resolve();
+  }
+}
+
 // Short-term memory logging
 function logToShortTermMemory(channel: string, direction: "in" | "out", content: string): void {
   const timestamp = getLocalTimestamp();
@@ -551,78 +639,170 @@ function getRecentTranscriptContext(sessionKey?: string): string {
 // Track if rollup is in progress to avoid concurrent rollups
 let rollupInProgress = false;
 
+// Extract a chunk from the beginning of the short-term buffer
+// Returns the path to the chunk file, or null if buffer is too small
+function extractChunkFromBuffer(): string | null {
+  if (!fs.existsSync(SHORT_TERM_MEMORY_FILE)) {
+    return null;
+  }
+
+  const content = fs.readFileSync(SHORT_TERM_MEMORY_FILE, "utf-8");
+  const chunkSizeBytes = getChunkSizeBytes();
+  if (content.length < chunkSizeBytes) {
+    return null;
+  }
+
+  const lines = content.split("\n");
+  let chunkContent = "";
+  let chunkLineCount = 0;
+
+  // Accumulate lines until we hit the chunk size
+  for (const line of lines) {
+    if (chunkContent.length + line.length + 1 > chunkSizeBytes) {
+      break;
+    }
+    chunkContent += line + "\n";
+    chunkLineCount++;
+  }
+
+  if (chunkLineCount === 0) {
+    return null;
+  }
+
+  // Write chunk to pending directory
+  const timestamp = Date.now();
+  const chunkFile = path.join(ROLLUP_PENDING_DIR, `chunk-${timestamp}.txt`);
+  fs.writeFileSync(chunkFile, chunkContent);
+
+  // Remove extracted lines from buffer (keep the rest)
+  const remainingLines = lines.slice(chunkLineCount);
+  fs.writeFileSync(SHORT_TERM_MEMORY_FILE, remainingLines.join("\n"));
+
+  const chunkSizeKB = Math.round(chunkContent.length / 1024);
+  const remainingSizeKB = Math.round(remainingLines.join("\n").length / 1024);
+  log(`[Memory] Extracted ${chunkSizeKB}KB chunk (${chunkLineCount} lines) -> ${chunkFile}. Buffer now ${remainingSizeKB}KB.`);
+
+  return chunkFile;
+}
+
+// Get all pending chunk files, sorted oldest first
+function getPendingChunks(): string[] {
+  if (!fs.existsSync(ROLLUP_PENDING_DIR)) {
+    return [];
+  }
+  return fs.readdirSync(ROLLUP_PENDING_DIR)
+    .filter(f => f.startsWith("chunk-") && f.endsWith(".txt"))
+    .map(f => path.join(ROLLUP_PENDING_DIR, f))
+    .sort(); // Oldest first (timestamp in filename)
+}
+
 async function checkAndTriggerRollup(): Promise<void> {
   const size = getShortTermMemorySize();
-  if (size < SHORT_TERM_SIZE_THRESHOLD) {
+
+  // First, extract chunks if buffer is over threshold
+  // This happens synchronously and immediately, before any Claude job
+  const sizeThreshold = getShortTermSizeThreshold();
+  if (size >= sizeThreshold) {
+    log(`[Memory] Short-term buffer at ${Math.round(size / 1024)}KB (threshold: ${Math.round(sizeThreshold / 1024)}KB). Extracting chunks...`);
+
+    // Extract chunks until we're under threshold
+    let currentSize = size;
+    while (currentSize >= sizeThreshold) {
+      const chunkFile = extractChunkFromBuffer();
+      if (!chunkFile) break; // Buffer too small to extract more
+      currentSize = getShortTermMemorySize();
+    }
+  }
+
+  // Now process any pending chunks
+  const pendingChunks = getPendingChunks();
+  if (pendingChunks.length === 0) {
     return;
   }
 
   if (rollupInProgress) {
-    log(`[Memory] Rollup already in progress, skipping.`);
+    log(`[Memory] Rollup already in progress, ${pendingChunks.length} chunks waiting.`);
     return;
   }
 
-  log(`[Memory] Short-term memory at ${size} bytes (threshold: ${SHORT_TERM_SIZE_THRESHOLD}). Triggering auto-rollup...`);
   rollupInProgress = true;
 
   try {
-    await performRollup();
-    log(`[Memory] Auto-rollup completed successfully.`);
+    // Process chunks one at a time
+    for (const chunkFile of pendingChunks) {
+      log(`[Memory] Processing chunk: ${path.basename(chunkFile)}`);
+      await performRollup(chunkFile);
+      // Delete chunk after successful processing
+      fs.unlinkSync(chunkFile);
+      log(`[Memory] Chunk processed and deleted: ${path.basename(chunkFile)}`);
+    }
+    log(`[Memory] All ${pendingChunks.length} chunks processed successfully.`);
   } catch (err) {
-    log(`[Memory] Auto-rollup failed: ${err}`);
+    log(`[Memory] Rollup failed: ${err}`);
   } finally {
     rollupInProgress = false;
   }
 }
 
-async function performRollup(): Promise<void> {
-  // Read the short-term buffer
-  const shortTermContent = fs.readFileSync(SHORT_TERM_MEMORY_FILE, "utf-8");
-  if (!shortTermContent.trim()) {
-    log(`[Memory] Short-term buffer is empty, nothing to roll up.`);
+async function performRollup(chunkFile: string): Promise<void> {
+  const chunkContent = fs.readFileSync(chunkFile, "utf-8");
+  if (!chunkContent.trim()) {
+    log(`[Memory] Chunk file is empty, skipping.`);
     return;
   }
 
-  const lines = shortTermContent.trim().split("\n");
-  const totalLines = lines.length;
-  const bufferSizeKB = Math.round(shortTermContent.length / 1024);
+  const chunkSizeKB = Math.round(chunkContent.length / 1024);
+  const lineCount = chunkContent.trim().split("\n").length;
 
-  const rollupPrompt = `You need to perform a memory rollup. Here is the short-term memory buffer containing recent conversations:
+  // Lightweight prompt - points to file instead of embedding content
+  const rollupPrompt = `MEMORY ROLLUP TASK
 
----
-${shortTermContent}
----
+A chunk of conversation history needs to be processed into long-term memory.
 
-CRITICAL: This is a CONSOLIDATION task, not an append task. You must:
+**Chunk file:** ${chunkFile}
+**Size:** ${chunkSizeKB}KB (${lineCount} lines)
 
-1. First use 'recall' (no args) to see all existing long-term memory files
-2. For each relevant file (journal.md, projects.md, etc.), use 'recall' to read its CURRENT content
-3. Identify NEW information from the buffer that isn't already captured
-4. REWRITE each file with the updated/consolidated content using 'remember' with mode='replace'
+## Instructions
 
-RULES:
-- DO NOT just append to files - that creates redundancy
-- MERGE new info into existing sections where relevant
-- REMOVE redundant/duplicate information
-- Keep files well-organized with clear sections
-- For journal.md: Summarize older entries, keep recent ones detailed
-- For projects.md: Update status, don't duplicate what's already there
-- Be VERY selective - only save info useful for future recall
+1. **Read the chunk file** using the Read tool
+2. **List existing memory files** using recall() with no args
+3. **Read each relevant long-term file** to see current contents
+4. **UPDATE (not append!)** files with new information from the chunk
 
-Example workflow:
-1. recall() → see files exist
-2. recall(file="journal.md") → read current content
-3. Identify what's NEW in the buffer vs what's already in journal.md
-4. remember(file="journal.md", content="[consolidated content]", mode="replace")
-5. Repeat for other files as needed
+## CRITICAL RULES
 
-Do NOT call any tools to trim or clear the buffer - the watcher handles that.`;
+- **MERGE, don't append** - If info already exists, update it in place
+- **Remove duplicates** - Don't create redundant entries
+- **Add dates** - Every entry should have a date prefix like [2026-01-31]
+- **Be selective** - Only save info useful for future recall (decisions, learnings, project status, important context)
+- **Split large files** - If a file would exceed 30KB, split it (e.g., journal-2026-01.md, journal-2026-02.md)
 
-  // Create a job file so this shows in the dashboard
+## File Guidelines
+
+- **journal.md** - Activity log with dates. Summarize old entries, keep recent ones detailed.
+- **projects.md** - Active project status. Update existing entries, don't duplicate.
+- **people.md** - Contact info and relationship notes.
+- **Create new files** as needed for distinct topics.
+
+## Example Workflow
+
+1. Read chunk: \`Read tool on ${chunkFile}\`
+2. Check files: \`recall()\` → see journal.md, projects.md exist
+3. Read current: \`recall(file="journal.md")\` → see what's there
+4. Identify NEW info in chunk that's not already in journal.md
+5. Rewrite with merged content: \`remember(file="journal.md", content="[merged content]", mode="replace")\`
+6. Repeat for other relevant files
+
+DO NOT try to clear or modify the chunk file - the watcher handles cleanup.`;
+
   const jobId = generateJobId();
 
+  // Wait for a global slot if we're at capacity
+  const dummyEvent: ChannelEvent = { sessionKey: "memory-rollup", prompt: "", payload: {}, message: { isMessage: false, text: "" } };
+  await waitForGlobalSlot(dummyEvent);
+
   return new Promise((resolve, reject) => {
-    log(`[Memory] Starting rollup job ${jobId} (buffer: ${bufferSizeKB}KB, ${totalLines} lines)`);
+    log(`[Memory] Starting rollup job ${jobId} for chunk ${path.basename(chunkFile)} (${chunkSizeKB}KB, ${lineCount} lines)`);
 
     const proc = spawn(
       "claude",
@@ -641,7 +821,7 @@ Do NOT call any tools to trim or clear the buffer - the watcher handles that.`;
     );
 
     // Track in job system
-    createJobFile(jobId, "memory-rollup", `[Auto-Rollup] Buffer at ${bufferSizeKB}KB (${totalLines} lines)`, proc.pid, rollupPrompt);
+    createJobFile(jobId, "memory-rollup", `[Rollup] ${path.basename(chunkFile)} (${chunkSizeKB}KB)`, proc.pid, rollupPrompt);
     runningJobs.set(jobId, proc);
 
     let stderr = "";
@@ -680,12 +860,11 @@ Do NOT call any tools to trim or clear the buffer - the watcher handles that.`;
       const status = wasKilled ? "stopped" : (code === 0 ? "completed" : "error");
       finalizeJob(jobId, status, lastCost, lastDurationMs);
 
+      // Release global slot so queued jobs can run
+      releaseGlobalSlot();
+
       if (code === 0) {
-        // Trim buffer to keep only the most recent 25%
-        const linesToKeep = Math.ceil(totalLines * SHORT_TERM_RETAIN_RATIO);
-        const retainedLines = lines.slice(-linesToKeep);
-        fs.writeFileSync(SHORT_TERM_MEMORY_FILE, retainedLines.join("\n") + "\n");
-        log(`[Memory] Rollup job ${jobId} completed. Trimmed buffer from ${totalLines} to ${linesToKeep} lines (kept ${Math.round(SHORT_TERM_RETAIN_RATIO * 100)}%)`);
+        log(`[Memory] Rollup job ${jobId} completed successfully.`);
         resolve();
       } else {
         reject(new Error(`Rollup process exited with code ${code}: ${stderr}`));
@@ -694,6 +873,7 @@ Do NOT call any tools to trim or clear the buffer - the watcher handles that.`;
 
     proc.on("error", (err) => {
       finalizeJob(jobId, "error");
+      releaseGlobalSlot();
       reject(err);
     });
   });
@@ -796,104 +976,8 @@ async function handleChannelEvent(
     logToShortTermMemory(channel.name, "in", incomingContent);
   }
 
-  // Handle special commands for interactive channels
-  // Use normalized message.isMessage and message.text instead of payload-specific fields
-  if (supportsCommands(channel.name) && event.message?.isMessage) {
-    const cmd = parseCommand(event.message.text);
-
-    if (cmd) {
-      log(`[Watcher] Processing command ${cmd.type} for ${channel.name}`);
-
-      // Helper to send a quick response - works for all channels
-      const sendQuickReply = (message: string) => {
-        if (channel.name === "dashboard") {
-          // Dashboard: update the chat file directly
-          const assistantMessageId = payload.assistantMessageId;
-          if (assistantMessageId) {
-            sendDashboardCommandResponse(assistantMessageId, message);
-          }
-        } else {
-          // Other channels: use the handler to synthesize a response
-          const handler = channel.createHandler(event);
-          handler.onStreamEvent({
-            type: "assistant",
-            message: { content: [{ type: "text", text: message }] }
-          });
-          handler.onComplete(0);
-        }
-      };
-
-      switch (cmd.type) {
-        case "new":
-          clearSession(sessionKey);
-          log(`[Watcher] Session cleared for ${sessionKey} via /new command`);
-          sendQuickReply("Fresh start, boss. New session is ready.");
-          return;
-
-        case "restart":
-          log(`[Watcher] Restart requested via /restart command`);
-          sendQuickReply("Restarting... Back in a few seconds.");
-          spawn(path.join(PROJECT_ROOT, "restart.sh"), [], {
-            cwd: PROJECT_ROOT,
-            stdio: ["ignore", "ignore", "ignore"],
-            detached: true,
-          }).unref();
-          return;
-
-        case "memory_session":
-          setMemoryMode(sessionKey, "session");
-          log(`[Watcher] Memory mode changed to session for ${sessionKey}`);
-          sendQuickReply("Switched to session memory. I'll remember our conversation within this session.");
-          return;
-
-        case "memory_transcript": {
-          setMemoryMode(sessionKey, "transcript");
-          if (cmd.args?.lines !== undefined) {
-            setTranscriptLines(sessionKey, cmd.args.lines);
-          }
-          const currentLines = getTranscriptLines(sessionKey);
-          log(`[Watcher] Memory mode changed to transcript for ${sessionKey} (${currentLines} lines)`);
-          sendQuickReply(`Switched to transcript memory. Each message is a fresh session, but I'll see the last ${currentLines} messages from all channels.`);
-          return;
-        }
-
-        case "memory_status": {
-          const currentMode = getMemoryMode(sessionKey);
-          if (currentMode === "transcript") {
-            const currentLines = getTranscriptLines(sessionKey);
-            sendQuickReply(`Memory mode: transcript (${currentLines} lines)\n\nUse /memory session or /memory transcript [lines] to switch.`);
-          } else {
-            sendQuickReply(`Memory mode: ${currentMode}\n\nUse /memory session or /memory transcript [lines] to switch.`);
-          }
-          return;
-        }
-
-        case "queue_on":
-          setQueueMode(sessionKey, "queue");
-          log(`[Watcher] Queue mode changed to queue for ${sessionKey}`);
-          sendQuickReply("Queue mode ON. Messages will pile up and process after the current job finishes.");
-          return;
-
-        case "queue_off":
-          setQueueMode(sessionKey, "interrupt");
-          log(`[Watcher] Queue mode changed to interrupt for ${sessionKey}`);
-          sendQuickReply("Queue mode OFF (interrupt). New messages will kill the current job and start fresh.");
-          return;
-
-        case "queue_status": {
-          const currentMode = getQueueMode(sessionKey);
-          const status = currentMode === "queue" ? "ON (messages queue up)" : "OFF (messages interrupt)";
-          sendQuickReply(`Queue mode: ${status}\n\nUse /queue on or /queue off to switch.`);
-          return;
-        }
-
-        // Note: /stop and /stop_job are handled with priority in processEvent() before queueing
-        default:
-          // Command was parsed but not handled here (e.g., /stop)
-          break;
-      }
-    }
-  }
+  // Note: All commands (/stop, /new, /memory, /queue, /restart) are now handled with priority
+  // in processEvent() before queueing, so they bypass both session and global queues.
 
   // Note: Email security filtering is now handled by the email channel itself
 
@@ -954,6 +1038,12 @@ async function handleChannelEvent(
 
   // Create handler for this event
   const handler = channel.createHandler(event);
+
+  // Wait for a global slot if we're at capacity
+  await waitForGlobalSlot(event);
+
+  // Signal work is starting (typing indicator, reaction, etc.)
+  handler.onWorkStarted?.();
 
   // Spawn Claude
   // In transcript mode: always new session. In session mode: resume if exists.
@@ -1044,12 +1134,17 @@ async function handleChannelEvent(
 
     proc.on("close", (code, signal) => {
       log(`[Watcher] Claude exited with code ${code}, signal ${signal} [job: ${jobId}]`);
+      // Signal work is complete (remove typing indicator, reaction, etc.)
+      handler.onWorkComplete?.();
       handler.onComplete(code || 0);
 
       // Determine status: stopped if killed by signal, otherwise completed/error
       const wasKilled = signal === "SIGTERM" || signal === "SIGKILL";
       const status = wasKilled ? "stopped" : (code === 0 ? "completed" : "error");
       finalizeJob(jobId, status, lastCost, lastDurationMs);
+
+      // Release global slot so queued jobs can run
+      releaseGlobalSlot();
 
       // Log outgoing response to short-term memory
       if (outgoingTextBuffer.trim()) {
@@ -1080,6 +1175,7 @@ async function handleChannelEvent(
 
     proc.on("error", (err) => {
       log(`[Watcher] Claude spawn error: ${err.message}`);
+      handler.onWorkComplete?.();
       handler.onComplete(1);
       finalizeJob(jobId, "error");
       reject(err);
@@ -1112,14 +1208,12 @@ async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Pr
   const { sessionKey, payload } = event;
   const lockKey = channel.concurrency === "global" ? channel.name : sessionKey;
 
-  // PRIORITY: Handle /stop command immediately, before queueing
-  // This ensures stop commands can interrupt running jobs
+  // PRIORITY: Handle control commands immediately, before queueing
+  // This ensures /stop, /new, /memory, /queue bypass all queues
   if (supportsCommands(channel.name) && event.message?.isMessage) {
     const cmd = parseCommand(event.message.text);
 
-    if (cmd && (cmd.type === "stop" || cmd.type === "stop_job")) {
-      log(`[Watcher] Processing /stop command with priority (bypassing queue)`);
-
+    if (cmd) {
       // Helper to send a quick response - works for all channels
       const sendQuickReply = (message: string) => {
         if (channel.name === "dashboard") {
@@ -1137,25 +1231,100 @@ async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Pr
         }
       };
 
-      if (cmd.type === "stop_job" && cmd.args?.jobId) {
-        const killed = killJob(cmd.args.jobId);
-        if (killed) {
-          log(`[Watcher] Stopped job ${cmd.args.jobId} via /stop command`);
-          sendQuickReply(`Done. Killed job ${cmd.args.jobId}.`);
-        } else {
-          sendQuickReply(`Couldn't find running job ${cmd.args.jobId}. It might have already finished.`);
+      // Handle all control commands with priority (bypass queues)
+      switch (cmd.type) {
+        case "stop":
+        case "stop_job":
+          log(`[Watcher] Processing /stop command with priority (bypassing queue)`);
+          if (cmd.type === "stop_job" && cmd.args?.jobId) {
+            const killed = killJob(cmd.args.jobId);
+            if (killed) {
+              log(`[Watcher] Stopped job ${cmd.args.jobId} via /stop command`);
+              sendQuickReply(`Done. Killed job ${cmd.args.jobId}.`);
+            } else {
+              sendQuickReply(`Couldn't find running job ${cmd.args.jobId}. It might have already finished.`);
+            }
+          } else {
+            const runningJobId = getRunningJobId();
+            if (runningJobId) {
+              killJob(runningJobId);
+              log(`[Watcher] Stopped running job ${runningJobId} via /stop command`);
+              sendQuickReply(`Done. Killed the running job.`);
+            } else {
+              sendQuickReply(`Nothing running right now, boss.`);
+            }
+          }
+          return;
+
+        case "new":
+          log(`[Watcher] Processing /new command with priority (bypassing queue)`);
+          clearSession(sessionKey);
+          sendQuickReply("Fresh start, boss. New session is ready.");
+          return;
+
+        case "restart":
+          log(`[Watcher] Processing /restart command with priority (bypassing queue)`);
+          sendQuickReply("Restarting... Back in a few seconds.");
+          spawn(path.join(PROJECT_ROOT, "restart.sh"), [], {
+            cwd: PROJECT_ROOT,
+            stdio: ["ignore", "ignore", "ignore"],
+            detached: true,
+          }).unref();
+          return;
+
+        case "memory_session":
+          log(`[Watcher] Processing /memory session command with priority (bypassing queue)`);
+          setMemoryMode(sessionKey, "session");
+          sendQuickReply("Switched to session memory. I'll remember our conversation within this session.");
+          return;
+
+        case "memory_transcript": {
+          log(`[Watcher] Processing /memory transcript command with priority (bypassing queue)`);
+          setMemoryMode(sessionKey, "transcript");
+          if (cmd.args?.lines !== undefined) {
+            setTranscriptLines(sessionKey, cmd.args.lines);
+          }
+          const currentLines = getTranscriptLines(sessionKey);
+          sendQuickReply(`Switched to transcript memory. Each message is a fresh session, but I'll see the last ${currentLines} messages from all channels.`);
+          return;
         }
-      } else {
-        const runningJobId = getRunningJobId();
-        if (runningJobId) {
-          killJob(runningJobId);
-          log(`[Watcher] Stopped running job ${runningJobId} via /stop command`);
-          sendQuickReply(`Done. Killed the running job.`);
-        } else {
-          sendQuickReply(`Nothing running right now, boss.`);
+
+        case "memory_status": {
+          log(`[Watcher] Processing /memory command with priority (bypassing queue)`);
+          const currentMode = getMemoryMode(sessionKey);
+          if (currentMode === "transcript") {
+            const currentLines = getTranscriptLines(sessionKey);
+            sendQuickReply(`Memory mode: transcript (${currentLines} lines)\n\nUse /memory session or /memory transcript [lines] to switch.`);
+          } else {
+            sendQuickReply(`Memory mode: ${currentMode}\n\nUse /memory session or /memory transcript [lines] to switch.`);
+          }
+          return;
         }
+
+        case "queue_on":
+          log(`[Watcher] Processing /queue on command with priority (bypassing queue)`);
+          setQueueMode(sessionKey, "queue");
+          sendQuickReply("Queue mode ON. Messages will pile up and process after the current job finishes.");
+          return;
+
+        case "queue_off":
+          log(`[Watcher] Processing /queue off command with priority (bypassing queue)`);
+          setQueueMode(sessionKey, "interrupt");
+          sendQuickReply("Queue mode OFF (interrupt). New messages will kill the current job and start fresh.");
+          return;
+
+        case "queue_status": {
+          log(`[Watcher] Processing /queue command with priority (bypassing queue)`);
+          const currentMode = getQueueMode(sessionKey);
+          const status = currentMode === "queue" ? "ON (messages queue up)" : "OFF (messages interrupt)";
+          sendQuickReply(`Queue mode: ${status}\n\nUse /queue on or /queue off to switch.`);
+          return;
+        }
+
+        default:
+          // Unknown command - let it go through normal processing
+          break;
       }
-      return; // Don't queue or process further
     }
   }
 
@@ -1382,6 +1551,10 @@ async function handleCronJob(job: CronJob): Promise<void> {
 
   const handler = new CronEventHandler(job.id);
 
+  // Wait for a global slot if we're at capacity
+  const dummyEvent: ChannelEvent = { sessionKey, prompt, payload: {}, message: { isMessage: false, text: "" } };
+  await waitForGlobalSlot(dummyEvent);
+
   // Create a job file for this cron execution
   const jobFileId = generateJobId();
 
@@ -1451,6 +1624,9 @@ async function handleCronJob(job: CronJob): Promise<void> {
       const status = wasKilled ? "stopped" : (code === 0 ? "completed" : "error");
       finalizeJob(jobFileId, status, lastCost, lastDurationMs);
 
+      // Release global slot so queued jobs can run
+      releaseGlobalSlot();
+
       // Log cron output to short-term memory
       if (handler.textBuffer.trim()) {
         logToShortTermMemory("cron", "in", `[${job.description}] ${job.prompt}`);
@@ -1464,6 +1640,7 @@ async function handleCronJob(job: CronJob): Promise<void> {
     proc.on("error", (err) => {
       handler.onComplete(1);
       finalizeJob(jobFileId, "error");
+      releaseGlobalSlot();
       reject(err);
     });
   });
@@ -1545,6 +1722,12 @@ async function watch(): Promise<void> {
 
   // Load channel config
   const channelsConfig = loadChannelsConfig();
+
+  // Apply global settings
+  if (channelsConfig.global?.maxConcurrentJobs !== undefined) {
+    maxConcurrentJobs = channelsConfig.global.maxConcurrentJobs;
+  }
+  log(`[Watcher] Max concurrent jobs: ${maxConcurrentJobs}`);
 
   // All available channels
   const allChannels: ChannelDefinition[] = [

@@ -1,23 +1,22 @@
 #!/bin/bash
 
-# Kill just the dashboard
+# Kill the dashboard API server
 
-echo "Killing dashboard..."
+echo "Killing API server..."
 
-# Kill Next.js dashboard - multiple patterns to catch it
-pkill -f "next-server.*dashboard" 2>/dev/null
-pkill -f "node.*dashboard.*next" 2>/dev/null
-pkill -f "npm.*start.*-p 3000" 2>/dev/null
+# Kill API server - multiple patterns to catch it
+pkill -f "node.*api/dist/index.js" 2>/dev/null
+pkill -f "node dist/index.js" 2>/dev/null
 
-# Kill any process on port 3000
-fuser -k 3000/tcp 2>/dev/null
+# Kill any process on port 3100
+lsof -ti:3100 | xargs -r kill -9 2>/dev/null
 
 sleep 1
 
 # Verify it's dead
-if fuser 3000/tcp > /dev/null 2>&1; then
-    echo "Dashboard still running, force killing..."
-    fuser -k -9 3000/tcp 2>/dev/null
+if lsof -ti:3100 > /dev/null 2>&1; then
+    echo "API server still running, force killing..."
+    lsof -ti:3100 | xargs -r kill -9 2>/dev/null
 fi
 
-echo "Dashboard stopped."
+echo "API server stopped."

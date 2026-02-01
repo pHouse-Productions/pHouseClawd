@@ -1,8 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
 
 const navItems = [
@@ -78,7 +75,8 @@ function isActive(pathname: string, href: string): boolean {
 }
 
 export default function Sidebar() {
-  const pathname = usePathname();
+  const location = useLocation();
+  const pathname = location.pathname;
   const { logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -136,7 +134,7 @@ export default function Sidebar() {
               return (
                 <li key={item.href}>
                   <Link
-                    href={item.href}
+                    to={item.href}
                     onClick={closeMobile}
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
                       active
@@ -168,7 +166,7 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {/* Desktop Sidebar - unchanged */}
+      {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-64 bg-zinc-900 border-r border-zinc-800 flex-col">
         <div className="p-6 border-b border-zinc-800">
           <h1 className="text-xl font-bold text-white">AI Dashboard</h1>
@@ -181,7 +179,7 @@ export default function Sidebar() {
               return (
                 <li key={item.href}>
                   <Link
-                    href={item.href}
+                    to={item.href}
                     className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
                       active
                         ? "bg-zinc-800 text-white"

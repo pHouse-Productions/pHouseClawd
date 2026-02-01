@@ -1,4 +1,12 @@
 {
+  "global": {
+    "maxConcurrentJobs": 2,
+    "memory": {
+      "shortTermSizeThresholdKB": 50,
+      "chunkSizeKB": 25,
+      "longTermFileMaxSizeKB": 30
+    }
+  },
   "channels": {
     "telegram": {
       "enabled": true
@@ -8,6 +16,12 @@
     },
     "gchat": {
       "enabled": false
+    },
+    "discord": {
+      "enabled": false
+    },
+    "dashboard": {
+      "enabled": true
     }
   }
 }

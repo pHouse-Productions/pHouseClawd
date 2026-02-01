@@ -4,7 +4,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as https from "https";
 import { fileURLToPath } from "url";
-import type { ChannelDefinition, ChannelEvent, ChannelEventHandler, StreamEvent } from "./types.js";
+import type { Channel, ChannelEvent, StreamHandler, ChannelDefinition, ChannelEventHandler, StreamEvent } from "./types.js";
 import { OutputHandler, type Verbosity } from "./output-handler.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -120,45 +120,67 @@ function isSentMessage(text: string): boolean {
   return false;
 }
 
-// Handler for a single Discord event
-class DiscordEventHandler implements ChannelEventHandler {
+// Stream handler for Discord - handles output back to channel
+class DiscordStreamHandler implements StreamHandler {
   private channelId: string;
   private messageId: string;
-  private outputHandler: OutputHandler;
   private discordClient: Client | null = null;
-  private hasAddedReaction = false;
 
-  constructor(channelId: string, messageId: string, verbosity: Verbosity = "streaming", discordClient?: Client) {
+  constructor(channelId: string, messageId: string, discordClient?: Client) {
     this.channelId = channelId;
     this.messageId = messageId;
     this.discordClient = discordClient || null;
-
-    this.outputHandler = new OutputHandler(
-      { verbosity },
-      {
-        onSend: (message) => this.sendMessage(message),
-        // Discord has both typing indicator AND reactions - we use both
-        // Typing indicator refreshes via the 4-second interval in OutputHandler
-        // Reaction is added once and removed when complete
-        onWorkStarted: () => {
-          this.sendTypingIndicator();
-          this.addWorkingReaction();
-        },
-        onWorkComplete: () => this.removeWorkingReaction(),
-      }
-    );
   }
 
-  private async addWorkingReaction(): Promise<void> {
-    // Only add reaction once
-    if (this.hasAddedReaction || !this.discordClient || !this.messageId) return;
+  async relayMessage(text: string): Promise<void> {
+    if (!text || !text.trim()) return;
+
+    // Discord has a 2000 character limit - split long messages
+    const MAX_LENGTH = 1900;
+    const chunks = this.splitMessage(text, MAX_LENGTH);
+
+    log(`[DiscordChannel] Sending ${text.length} chars in ${chunks.length} chunk(s) to ${this.channelId}`);
+
+    // Track all chunks to prevent echo loops
+    chunks.forEach(chunk => trackSentMessage(chunk));
+
+    // Send chunks with delay to maintain order
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 500));
+      try {
+        const proc = spawn("npx", ["tsx", SEND_SCRIPT, this.channelId, chunks[i]], {
+          cwd: PROJECT_ROOT,
+          stdio: ["ignore", "ignore", "ignore"],
+          detached: true,
+        });
+        proc.unref();
+      } catch (err) {
+        log(`[DiscordChannel] Failed to send chunk: ${err}`);
+      }
+    }
+  }
+
+  async startTyping(): Promise<void> {
+    try {
+      const proc = spawn("npx", ["tsx", TYPING_SCRIPT, this.channelId], {
+        cwd: PROJECT_ROOT,
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+      });
+      proc.unref();
+    } catch (err) {
+      log(`[DiscordChannel] Failed to send typing: ${err}`);
+    }
+  }
+
+  async startReaction(): Promise<void> {
+    if (!this.discordClient || !this.messageId) return;
 
     try {
       const channel = await this.discordClient.channels.fetch(this.channelId);
       if (channel && (channel instanceof TextChannel || channel instanceof DMChannel || channel instanceof NewsChannel)) {
         const message = await channel.messages.fetch(this.messageId);
         await message.react("👀");
-        this.hasAddedReaction = true;
         log(`[DiscordChannel] Added working reaction to ${this.messageId}`);
       }
     } catch (err) {
@@ -166,8 +188,8 @@ class DiscordEventHandler implements ChannelEventHandler {
     }
   }
 
-  private async removeWorkingReaction(): Promise<void> {
-    if (!this.hasAddedReaction || !this.discordClient || !this.messageId) return;
+  async stopReaction(): Promise<void> {
+    if (!this.discordClient || !this.messageId) return;
 
     try {
       const channel = await this.discordClient.channels.fetch(this.channelId);
@@ -184,51 +206,12 @@ class DiscordEventHandler implements ChannelEventHandler {
     }
   }
 
-  onStreamEvent(event: StreamEvent): void {
-    this.outputHandler.onStreamEvent(event);
-  }
-
-  onComplete(code: number): void {
-    this.outputHandler.onComplete(code);
-    log(`[DiscordChannel] Complete for channel ${this.channelId}, code ${code}`);
-  }
-
-  private sendMessage(message: string): void {
-    if (!message || !message.trim()) return;
-
-    // Discord has a 2000 character limit - split long messages
-    const MAX_LENGTH = 1900; // Leave some margin
-    const chunks = this.splitMessage(message, MAX_LENGTH);
-
-    log(`[DiscordChannel] Sending ${message.length} chars in ${chunks.length} chunk(s) to ${this.channelId}`);
-
-    // Track all chunks to prevent echo loops
-    chunks.forEach(chunk => trackSentMessage(chunk));
-
-    // Send chunks with delay to maintain order
-    chunks.forEach((chunk, index) => {
-      setTimeout(() => {
-        try {
-          const proc = spawn("npx", ["tsx", SEND_SCRIPT, this.channelId, chunk], {
-            cwd: PROJECT_ROOT,
-            stdio: ["ignore", "ignore", "ignore"],
-            detached: true,
-          });
-          proc.unref();
-        } catch (err) {
-          log(`[DiscordChannel] Failed to send chunk: ${err}`);
-        }
-      }, index * 500); // 500ms between each chunk
-    });
-  }
-
   private splitMessage(message: string, maxLength: number): string[] {
     const chunks: string[] = [];
 
     if (message.length <= maxLength) {
       chunks.push(message);
     } else {
-      // Split on paragraph breaks first, then by length
       let remaining = message;
       while (remaining.length > 0) {
         if (remaining.length <= maxLength) {
@@ -236,14 +219,11 @@ class DiscordEventHandler implements ChannelEventHandler {
           break;
         }
 
-        // Try to split at a paragraph break
         let splitIndex = remaining.lastIndexOf("\n\n", maxLength);
         if (splitIndex === -1 || splitIndex < maxLength / 2) {
-          // No good paragraph break, try single newline
           splitIndex = remaining.lastIndexOf("\n", maxLength);
         }
         if (splitIndex === -1 || splitIndex < maxLength / 2) {
-          // No good newline, just split at max length
           splitIndex = maxLength;
         }
 
@@ -254,26 +234,67 @@ class DiscordEventHandler implements ChannelEventHandler {
 
     return chunks;
   }
+}
 
-  private sendTypingIndicator(): void {
-    try {
-      const proc = spawn("npx", ["tsx", TYPING_SCRIPT, this.channelId], {
-        cwd: PROJECT_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-        detached: true,
-      });
-      proc.unref();
-    } catch (err) {
-      log(`[DiscordChannel] Failed to send typing: ${err}`);
+// Legacy handler wrapper for backwards compatibility with watcher
+// TODO: Remove after watcher migration
+class DiscordEventHandler implements ChannelEventHandler {
+  private streamHandler: DiscordStreamHandler;
+  private outputHandler: OutputHandler;
+  private typingInterval: ReturnType<typeof setInterval> | null = null;
+
+  constructor(channelId: string, messageId: string, verbosity: Verbosity = "streaming", discordClient?: Client) {
+    this.streamHandler = new DiscordStreamHandler(channelId, messageId, discordClient);
+    this.outputHandler = new OutputHandler(
+      { verbosity },
+      { onSend: (message) => this.streamHandler.relayMessage(message) }
+    );
+  }
+
+  async onWorkStarted(): Promise<void> {
+    await this.streamHandler.startTyping();
+    await this.streamHandler.startReaction();
+
+    // Discord typing indicator expires after ~10 seconds, so repeat every 8 seconds
+    this.typingInterval = setInterval(() => {
+      this.streamHandler.startTyping();
+    }, 8000);
+  }
+
+  async onWorkComplete(): Promise<void> {
+    // Stop the typing interval
+    if (this.typingInterval) {
+      clearInterval(this.typingInterval);
+      this.typingInterval = null;
     }
+    await this.streamHandler.stopReaction();
+  }
+
+  onStreamEvent(event: StreamEvent): void {
+    this.outputHandler.onStreamEvent(event);
+  }
+
+  onComplete(code: number): void {
+    // Make sure typing interval is stopped on completion too
+    if (this.typingInterval) {
+      clearInterval(this.typingInterval);
+      this.typingInterval = null;
+    }
+    this.outputHandler.onComplete(code);
   }
 }
 
 // Discord channel definition
-export const DiscordChannel: ChannelDefinition = {
+export const DiscordChannel: Channel & ChannelDefinition = {
   name: "discord",
   concurrency: "session",
 
+  // New interface: listen()
+  async listen(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
+    return this.startListener(onEvent);
+  },
+
+  // Legacy interface: startListener()
   async startListener(onEvent: (event: ChannelEvent) => void): Promise<() => void> {
     const botToken = process.env.DISCORD_BOT_TOKEN;
     if (!botToken) {
@@ -382,7 +403,6 @@ export const DiscordChannel: ChannelDefinition = {
           text,
           message_id: messageId,
           downloaded_files: downloadedFiles,
-          verbosity: "streaming" as Verbosity,
           _client: client,
         },
         message: {
@@ -403,6 +423,13 @@ export const DiscordChannel: ChannelDefinition = {
     };
   },
 
+  // New interface: createStreamHandler()
+  createStreamHandler(event: ChannelEvent): StreamHandler {
+    const discordClient = event.payload._client || (DiscordChannel as any)._client;
+    return new DiscordStreamHandler(event.payload.channel_id, event.payload.message_id, discordClient);
+  },
+
+  // Legacy interface: createHandler()
   createHandler(event: ChannelEvent): ChannelEventHandler {
     const verbosity = event.payload.verbosity || "streaming";
     const discordClient = event.payload._client || (DiscordChannel as any)._client;
@@ -413,6 +440,12 @@ export const DiscordChannel: ChannelDefinition = {
     return `discord-${payload.channel_id}`;
   },
 
+  // New interface: getCustomPrompt()
+  getCustomPrompt(): string {
+    return this.getChannelContext!();
+  },
+
+  // Legacy interface: getChannelContext()
   getChannelContext(): string {
     return `[Channel: Discord]
 - To send files: Use mcp__discord__send_file with the channel ID and file path
