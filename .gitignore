@@ -10,7 +10,6 @@ dist/
 # Personal configuration (but allow seed templates)
 CLAUDE.md
 SOUL.md
-SYSTEM.md
 !seed/CLAUDE.md
 config/cron.json
 config/email-security.json
