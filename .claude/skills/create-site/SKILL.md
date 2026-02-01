@@ -240,25 +240,37 @@ jobs:
       # Add deployment step based on your hosting
 ```
 
-### 6. Configure Caddy
+### 6. Configure Caddy Subdomain
 
-Add subdomain to your Caddyfile:
+**Domain:** `mike-vito.rl-quests.com` (wildcard DNS configured)
+**Caddyfile location:** `/home/ubuntu/Caddyfile`
 
-```
-<subdomain>.<your-domain> {
-    # For Astro (static)
+Add subdomain to the Caddyfile:
+
+#### For Astro (static sites)
+```caddy
+<site-name>.mike-vito.rl-quests.com {
     root * /home/ubuntu/hosted-sites/<site-name>/dist
+    try_files {path} /index.html
     file_server
-
-    # For Next.js (app server)
-    # reverse_proxy localhost:<port>
 }
 ```
 
-Reload Caddy:
+#### For Next.js (app servers)
+```caddy
+<site-name>.mike-vito.rl-quests.com {
+    reverse_proxy localhost:<port>
+}
+```
+
+**Port Assignment:** Next.js apps use ports starting at 3201 (3200 is vito-leads, 3100 is dashboard-api)
+
+**Apply changes:**
 ```bash
 sudo systemctl reload caddy
 ```
+
+Caddy auto-provisions HTTPS certificates via Let's Encrypt.
 
 ### 7. Build & Deploy
 
