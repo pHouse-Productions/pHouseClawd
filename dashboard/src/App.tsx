@@ -19,6 +19,7 @@ import LogFile from "@/routes/LogFile";
 import Cron from "@/routes/Cron";
 import Config from "@/routes/Config";
 import ClaudeMd from "@/routes/ClaudeMd";
+import SoulMd from "@/routes/SoulMd";
 import Sites from "@/routes/Sites";
 import SiteLogs from "@/routes/SiteLogs";
 import Processes from "@/routes/Processes";
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="/cron" element={<Cron />} />
             <Route path="/config" element={<Config />} />
             <Route path="/config/claude-md" element={<ClaudeMd />} />
+            <Route path="/config/soul-md" element={<SoulMd />} />
             <Route path="/sites" element={<Sites />} />
             <Route path="/sites/:name/logs/:type" element={<SiteLogs />} />
             <Route path="/processes" element={<Processes />} />

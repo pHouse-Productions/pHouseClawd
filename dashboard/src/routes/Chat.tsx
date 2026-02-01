@@ -1,6 +1,15 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, KeyboardEvent } from "react";
 import { authFetch } from "@/lib/auth";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
+
+// Detect if user is on mobile device (not just touch-capable)
+// Uses screen width as primary indicator since touch detection is unreliable
+// (many laptops have touchscreens but users expect Enter to send)
+function isMobile(): boolean {
+  if (typeof window === "undefined") return false;
+  // Use 768px as breakpoint - standard tablet/mobile threshold
+  return window.innerWidth < 768;
+}
 
 interface Attachment {
   type: "image" | "file";
@@ -27,7 +36,27 @@ export default function Chat() {
   const [sending, setSending] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const shouldScrollRef = useRef<boolean>(false);
+
+  // Handle keyboard: Enter sends on desktop, Shift+Enter adds newline
+  // On mobile, Enter just adds newline (use send button)
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !isMobile()) {
+      e.preventDefault();
+      if (input.trim() || files.length > 0) {
+        handleSubmit(e as unknown as React.FormEvent);
+      }
+    }
+  };
+
+  // Auto-resize textarea
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    // Reset height to auto to shrink if needed, then set to scrollHeight
+    e.target.style.height = "auto";
+    e.target.style.height = Math.min(e.target.scrollHeight, 150) + "px";
+  };
 
   const scrollToBottom = () => {
     const container = messagesContainerRef.current;
@@ -199,12 +228,15 @@ export default function Chat() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
           </svg>
         </button>
-        <input
-          type="text"
+        <textarea
+          ref={textareaRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
           placeholder="Type a message..."
-          className="flex-1 px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-600"
+          rows={1}
+          className="flex-1 px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-600 resize-none"
+          style={{ maxHeight: "150px" }}
         />
         <button
           type="submit"

@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { authFetch } from "@/lib/auth";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export default function ClaudeMd() {
-  const [content, setContent] = useState("");
+  const [soulMd, setSoulMd] = useState("");
+  const [systemMd, setSystemMd] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     const fetchContent = async () => {
@@ -14,38 +15,17 @@ export default function ClaudeMd() {
         const res = await authFetch("/api/config");
         if (res.ok) {
           const data = await res.json();
-          setContent(data.claudeMd || "");
+          setSoulMd(data.soulMd || "");
+          setSystemMd(data.systemMd || "");
         }
       } catch (err) {
-        console.error("Failed to fetch CLAUDE.md:", err);
+        console.error("Failed to fetch config:", err);
       } finally {
         setLoading(false);
       }
     };
     fetchContent();
   }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      const res = await authFetch("/api/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "claudeMd", data: content }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMessage({ type: "success", text: data.message || "Saved!" });
-      } else {
-        setMessage({ type: "error", text: data.error || "Failed to save" });
-      }
-    } catch (err) {
-      setMessage({ type: "error", text: "Failed to save" });
-    } finally {
-      setSaving(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -55,6 +35,9 @@ export default function ClaudeMd() {
     );
   }
 
+  // Generate CLAUDE.md content (same as watcher does)
+  const claudeMd = `${soulMd}\n\n---\n\n${systemMd}`;
+
   return (
     <div className="flex flex-col h-[calc(100vh-5.5rem)] md:h-[calc(100vh-3rem)]">
       <div className="flex items-center justify-between mb-4">
@@ -63,35 +46,23 @@ export default function ClaudeMd() {
             ← Back to Config
           </Link>
           <h2 className="text-2xl font-bold text-white">CLAUDE.md</h2>
-          <p className="text-zinc-500 mt-1">System instructions</p>
+          <p className="text-zinc-500 mt-1">Generated from SOUL.md + SYSTEM.md (read-only)</p>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50"
-        >
-          {saving ? "Saving..." : "Save"}
-        </button>
+        <div className="flex gap-2">
+          <Link
+            to="/config/soul-md"
+            className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg transition-colors text-sm"
+          >
+            Edit SOUL.md
+          </Link>
+        </div>
       </div>
 
-      {message && (
-        <div
-          className={`p-3 rounded-lg mb-4 ${
-            message.type === "success"
-              ? "bg-green-600/20 text-green-400"
-              : "bg-red-600/20 text-red-400"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        className="w-full flex-1 min-h-0 bg-zinc-900 border border-zinc-800 rounded-lg p-4 text-zinc-100 font-mono text-sm resize-none focus:outline-none focus:border-zinc-700"
-        placeholder="# CLAUDE.md content..."
-      />
+      <div className="flex-1 min-h-0 overflow-auto bg-zinc-900 border border-zinc-800 rounded-lg p-6">
+        <article className="prose prose-invert prose-zinc max-w-none prose-headings:border-b prose-headings:border-zinc-800 prose-headings:pb-2 prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-a:text-blue-400 prose-strong:text-white prose-li:marker:text-zinc-500">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{claudeMd}</ReactMarkdown>
+        </article>
+      </div>
     </div>
   );
 }
