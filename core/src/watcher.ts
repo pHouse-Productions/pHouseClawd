@@ -964,7 +964,10 @@ async function performRollup(chunkFile: string): Promise<void> {
   const lineCount = readableContent.trim().split("\n").length;
 
   // Write readable version to a temp file for the rollup job
-  const readableChunkFile = chunkFile.replace(".txt", "-readable.txt");
+  // Avoid appending -readable multiple times if already present
+  const readableChunkFile = chunkFile.includes("-readable")
+    ? chunkFile
+    : chunkFile.replace(".txt", "-readable.txt");
   fs.writeFileSync(readableChunkFile, readableContent);
 
   // Lightweight prompt - points to file instead of embedding content

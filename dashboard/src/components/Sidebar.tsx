@@ -2,20 +2,46 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
 
-const navItems = [
-  { href: "/", label: "Home", icon: "home" },
-  { href: "/chat", label: "Chat", icon: "chat" },
-  { href: "/jobs", label: "Jobs", icon: "briefcase" },
-  { href: "/memory", label: "Memory", icon: "brain" },
-  { href: "/system", label: "System", icon: "book" },
-  { href: "/channels", label: "Channels", icon: "channels" },
-  { href: "/skills", label: "Skills", icon: "bolt" },
-  { href: "/sites", label: "Sites", icon: "globe" },
-  { href: "/processes", label: "Processes", icon: "server" },
-  { href: "/mcp", label: "MCP", icon: "plug" },
-  { href: "/logs", label: "Logs", icon: "file-text" },
-  { href: "/cron", label: "Cron", icon: "clock" },
-  { href: "/config", label: "Config", icon: "cog" },
+interface NavItem {
+  href: string;
+  label: string;
+  icon: string;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
+  {
+    label: "Main",
+    items: [
+      { href: "/", label: "Home", icon: "home" },
+      { href: "/chat", label: "Chat", icon: "chat" },
+      { href: "/jobs", label: "Jobs", icon: "briefcase" },
+    ],
+  },
+  {
+    label: "Assistant",
+    items: [
+      { href: "/memory", label: "Memory", icon: "brain" },
+      { href: "/system", label: "System", icon: "book" },
+      { href: "/skills", label: "Skills", icon: "bolt" },
+      { href: "/config", label: "Config", icon: "cog" },
+    ],
+  },
+  {
+    label: "Infrastructure",
+    items: [
+      { href: "/sites", label: "Sites", icon: "globe" },
+      { href: "/processes", label: "Processes", icon: "server" },
+      { href: "/channels", label: "Channels", icon: "channels" },
+      { href: "/mcp", label: "MCP", icon: "plug" },
+      { href: "/logs", label: "Logs", icon: "file-text" },
+      { href: "/cron", label: "Cron", icon: "clock" },
+    ],
+  },
 ];
 
 const icons: Record<string, React.ReactNode> = {
@@ -153,27 +179,34 @@ export default function Sidebar() {
           </button>
         </div>
         <nav className="flex-1 p-3 overflow-y-auto">
-          <ul className="space-y-1">
-            {navItems.map((item) => {
-              const active = isActive(pathname, item.href);
-              return (
-                <li key={item.href}>
-                  <Link
-                    to={item.href}
-                    onClick={closeMobile}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                      active
-                        ? "bg-zinc-800 text-white"
-                        : "text-zinc-400 active:bg-zinc-800/50"
-                    }`}
-                  >
-                    {icons[item.icon]}
-                    {item.label}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+          {navGroups.map((group) => (
+            <div key={group.label} className="mb-4">
+              <div className="px-3 py-1 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                {group.label}
+              </div>
+              <ul className="space-y-1 mt-1">
+                {group.items.map((item) => {
+                  const active = isActive(pathname, item.href);
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        to={item.href}
+                        onClick={closeMobile}
+                        className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                          active
+                            ? "bg-zinc-800 text-white"
+                            : "text-zinc-400 active:bg-zinc-800/50"
+                        }`}
+                      >
+                        {icons[item.icon]}
+                        {item.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </nav>
         <div className="p-3 border-t border-zinc-800">
           <button
@@ -198,26 +231,33 @@ export default function Sidebar() {
           <p className="text-sm text-zinc-500 mt-1">pHouseClawd</p>
         </div>
         <nav className="flex-1 p-4 overflow-y-auto">
-          <ul className="space-y-2">
-            {navItems.map((item) => {
-              const active = isActive(pathname, item.href);
-              return (
-                <li key={item.href}>
-                  <Link
-                    to={item.href}
-                    className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
-                      active
-                        ? "bg-zinc-800 text-white"
-                        : "text-zinc-400 hover:text-white hover:bg-zinc-800/50"
-                    }`}
-                  >
-                    {icons[item.icon]}
-                    {item.label}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+          {navGroups.map((group) => (
+            <div key={group.label} className="mb-5">
+              <div className="px-4 py-1 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                {group.label}
+              </div>
+              <ul className="space-y-1 mt-1">
+                {group.items.map((item) => {
+                  const active = isActive(pathname, item.href);
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        to={item.href}
+                        className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-colors ${
+                          active
+                            ? "bg-zinc-800 text-white"
+                            : "text-zinc-400 hover:text-white hover:bg-zinc-800/50"
+                        }`}
+                      >
+                        {icons[item.icon]}
+                        {item.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </nav>
         <div className="p-4 border-t border-zinc-800">
           <div className="flex items-center justify-between">
