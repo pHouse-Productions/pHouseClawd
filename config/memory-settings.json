@@ -1,5 +1,0 @@
-{
-  "shortTermSizeThreshold": 51200,
-  "chunkSizeBytes": 25600,
-  "longTermFileMaxSize": 30720
-}

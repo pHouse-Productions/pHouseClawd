@@ -4,7 +4,7 @@ import fs from "fs/promises";
 const router = Router();
 
 // Path to the cron config file
-const CRON_CONFIG_FILE = "/home/ubuntu/pHouseClawd/config/cron.json";
+const CRON_CONFIG_FILE = "/home/ubuntu/assistant/config/cron.json";
 const CRON_MCP_URL = "http://localhost:3002/mcp";
 
 // Session management for MCP connection

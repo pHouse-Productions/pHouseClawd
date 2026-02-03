@@ -24,6 +24,7 @@ import { getLocalTimestamp } from "./utils.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
+const ASSISTANT_ROOT = "/home/ubuntu/assistant";
 
 // Load environment variables from sibling pHouseMcp directory
 config({ path: path.resolve(PROJECT_ROOT, "../pHouseMcp/.env"), override: true });
@@ -49,26 +50,26 @@ const LOGS_DIR = path.join(PROJECT_ROOT, "logs");
 const JOBS_DIR = path.join(LOGS_DIR, "jobs");
 const LOG_FILE = path.join(LOGS_DIR, "watcher.log");
 const SESSIONS_FILE = path.join(LOGS_DIR, "sessions.json");
-const CRON_CONFIG_FILE = path.join(PROJECT_ROOT, "config/cron.json");
+const CRON_CONFIG_FILE = path.join(ASSISTANT_ROOT, "config/cron.json");
 const PID_FILE = path.join(PROJECT_ROOT, "watcher.pid");
 
-// Source files for CLAUDE.md generation
-const SOUL_FILE = path.join(PROJECT_ROOT, "SOUL.md");
-const SYSTEM_FILE = path.join(PROJECT_ROOT, "SYSTEM.md");
-const CLAUDE_FILE = path.join(PROJECT_ROOT, "CLAUDE.md");
+// Source files for CLAUDE.md generation (in assistant directory)
+const SOUL_FILE = path.join(ASSISTANT_ROOT, "SOUL.md");
+const SYSTEM_FILE = path.join(ASSISTANT_ROOT, "SYSTEM.md");
+const CLAUDE_FILE = path.join(ASSISTANT_ROOT, "CLAUDE.md");
 
 // Ensure jobs directory exists
 if (!fs.existsSync(JOBS_DIR)) {
   fs.mkdirSync(JOBS_DIR, { recursive: true });
 }
 
-// Short-term memory
-const SHORT_TERM_MEMORY_DIR = path.join(PROJECT_ROOT, "memory/short-term");
+// Short-term memory (in assistant directory)
+const SHORT_TERM_MEMORY_DIR = path.join(ASSISTANT_ROOT, "memory/short-term");
 const SHORT_TERM_MEMORY_FILE = path.join(SHORT_TERM_MEMORY_DIR, "buffer.txt");
-const ROLLUP_PENDING_DIR = path.join(PROJECT_ROOT, "memory/rollup-pending");
+const ROLLUP_PENDING_DIR = path.join(ASSISTANT_ROOT, "memory/rollup-pending");
 
 // Memory settings file
-const MEMORY_SETTINGS_FILE = path.join(PROJECT_ROOT, "config/memory-settings.json");
+const MEMORY_SETTINGS_FILE = path.join(ASSISTANT_ROOT, "config/memory-settings.json");
 
 // Memory config defaults (in bytes)
 const MEMORY_CONFIG_DEFAULTS = {
@@ -125,7 +126,7 @@ if (!fs.existsSync(ROLLUP_PENDING_DIR)) {
 }
 
 // Dashboard chat file (for command responses)
-const DASHBOARD_CHAT_FILE = path.join(PROJECT_ROOT, "memory/dashboard-chat.json");
+const DASHBOARD_CHAT_FILE = path.join(ASSISTANT_ROOT, "memory/dashboard-chat.json");
 
 interface DashboardChatMessage {
   id: string;
@@ -173,7 +174,7 @@ function sendDashboardCommandResponse(assistantMessageId: string, message: strin
 }
 
 // Channel config
-const CHANNELS_CONFIG_FILE = path.join(PROJECT_ROOT, "config/channels.json");
+const CHANNELS_CONFIG_FILE = path.join(ASSISTANT_ROOT, "config/channels.json");
 
 // Channel config types
 interface ChannelConfig {
@@ -639,7 +640,7 @@ function getShortTermMemorySize(): number {
 }
 
 // Get recent messages from short-term memory for transcript mode injection
-const LONG_TERM_MEMORY_DIR = path.join(PROJECT_ROOT, "memory/long-term");
+const LONG_TERM_MEMORY_DIR = path.join(ASSISTANT_ROOT, "memory/long-term");
 
 function getMemoryFilesInfo(): string {
   try {
@@ -1033,7 +1034,7 @@ DO NOT try to clear or modify the chunk file - the watcher handles cleanup.`;
         rollupPrompt
       ],
       {
-        cwd: PROJECT_ROOT,
+        cwd: ASSISTANT_ROOT,
         env: { ...process.env, FORCE_COLOR: "0" },
         stdio: ["ignore", "pipe", "pipe"],
       }
@@ -1132,7 +1133,7 @@ async function convertPdfToText(pdfPath: string): Promise<string> {
 
   return new Promise((resolve, reject) => {
     const proc = spawn("uvx", ["--from", "pymupdf", "python3", PDF_SCRIPT, pdfPath, outputPath], {
-      cwd: PROJECT_ROOT,
+      cwd: ASSISTANT_ROOT,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -1297,7 +1298,7 @@ async function handleChannelEvent(
         finalPrompt
       ],
       {
-        cwd: PROJECT_ROOT,
+        cwd: ASSISTANT_ROOT,
         env: { ...process.env, FORCE_COLOR: "0" },
         stdio: ["ignore", "pipe", "pipe"],
       }
@@ -1493,7 +1494,7 @@ async function processEvent(channel: ChannelDefinition, event: ChannelEvent): Pr
           log(`[Watcher] Processing /restart command with priority (bypassing queue)`);
           sendQuickReply("Restarting... Back in a few seconds.");
           spawn(path.join(PROJECT_ROOT, "restart.sh"), [], {
-            cwd: PROJECT_ROOT,
+            cwd: ASSISTANT_ROOT,
             stdio: ["ignore", "ignore", "ignore"],
             detached: true,
           }).unref();
@@ -1763,13 +1764,27 @@ class CronEventHandler implements ChannelEventHandler {
 async function handleCronJob(job: CronJob): Promise<void> {
   const sessionKey = `cron-${job.id}`;
 
-  // Add reminder to log outbound messages for visibility
-  const loggingReminder = `IMPORTANT: Before calling send_message or send_email, always output the message content as text first. This ensures the message gets logged. Example: "Sending message: [your message here]" then call the MCP tool.`;
-
   // Inject memory context so cron jobs have the same awareness as interactive sessions
   const memoryContext = getRecentTranscriptContext();
 
-  const prompt = `[Scheduled Task: ${job.description}]\n\n${loggingReminder}${memoryContext}\n${job.prompt}`;
+  // Structure: Task FIRST (clear instruction), then context as reference
+  // This prevents the model from getting confused by walls of context before seeing what to do
+  const prompt = `# SCHEDULED TASK: ${job.description}
+
+---
+
+## Your Task
+
+**Execute this scheduled task now.** If the task involves sending messages or emails, use the appropriate MCP tools (Telegram, Discord, Gmail). Don't ask clarifying questions—work with what you have and post any issues to Discord.
+
+${job.prompt}
+
+---
+
+## Background Context
+
+The following is recent conversation history for context. Use it to inform your work but focus on executing the task above.
+${memoryContext}`;
 
   const generation = getSessionGeneration(sessionKey);
   const sessionId = generateSessionId(`${sessionKey}-gen${generation}`);
@@ -1806,7 +1821,7 @@ async function handleCronJob(job: CronJob): Promise<void> {
         prompt
       ],
       {
-        cwd: PROJECT_ROOT,
+        cwd: ASSISTANT_ROOT,
         env: { ...process.env, FORCE_COLOR: "0" },
         stdio: ["ignore", "pipe", "pipe"],
       }

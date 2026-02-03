@@ -25,6 +25,7 @@ import systemRouter from "./routes/system.js";
 import cronRouter from "./routes/cron.js";
 import sitesRouter from "./routes/sites.js";
 import processesRouter from "./routes/processes.js";
+import navRouter from "./routes/nav.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,6 +53,10 @@ app.get("/api/auth/verify", verifyAuth);
 // OAuth routes (no auth required - they handle their own redirects)
 app.use("/api/oauth", oauthRouter);
 
+// Chat files - no auth required (files are already security-scoped to allowed directories)
+// This allows <img> tags to load images without credentials
+app.use("/api/chat/files", chatFilesRouter);
+
 // All other routes require authentication
 app.use("/api/status", authMiddleware, statusRouter);
 app.use("/api/logs", authMiddleware, logsRouter);
@@ -62,7 +67,6 @@ app.use("/api/jobs", authMiddleware, jobsRouter);
 app.use("/api/mcp", authMiddleware, mcpRouter);
 app.use("/api/config", authMiddleware, configRouter);
 app.use("/api/chat", authMiddleware, chatRouter);
-app.use("/api/chat/files", authMiddleware, chatFilesRouter);
 app.use("/api/discord", authMiddleware, discordRouter);
 app.use("/api/gchat", authMiddleware, gchatRouter);
 app.use("/api/watcher/fix", authMiddleware, watcherFixRouter);
@@ -70,6 +74,7 @@ app.use("/api/system", authMiddleware, systemRouter);
 app.use("/api/cron", authMiddleware, cronRouter);
 app.use("/api/sites", authMiddleware, sitesRouter);
 app.use("/api/processes", authMiddleware, processesRouter);
+app.use("/api/nav", authMiddleware, navRouter);
 
 // Error handling
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

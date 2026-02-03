@@ -46,10 +46,17 @@ export function getLocalTimestamp(): string {
 }
 
 /**
- * Get the project root path
+ * Get the project root path (pHouseClawd - infra code)
  */
 export function getProjectRoot(): string {
   return process.env.PHOUSE_PROJECT_ROOT || path.resolve(process.cwd(), "..");
+}
+
+/**
+ * Get the assistant root path (where Claude runs, memory lives)
+ */
+export function getAssistantRoot(): string {
+  return process.env.PHOUSE_ASSISTANT_ROOT || "/home/ubuntu/assistant";
 }
 
 /**

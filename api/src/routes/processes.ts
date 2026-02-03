@@ -44,27 +44,96 @@ function getPM2Processes(): PM2Process[] {
   }
 }
 
+// Get MCP gateway status from systemd
+function getMcpGatewayStatus(): PM2Process | null {
+  try {
+    const statusOutput = execSync("systemctl is-active mcp-gateway 2>/dev/null || echo 'inactive'", {
+      encoding: "utf-8",
+      timeout: 2000,
+    }).trim();
+
+    const isActive = statusOutput === "active";
+
+    // Get uptime if active
+    let uptime = 0;
+    if (isActive) {
+      try {
+        const uptimeOutput = execSync(
+          "systemctl show mcp-gateway --property=ActiveEnterTimestamp --value 2>/dev/null",
+          { encoding: "utf-8", timeout: 2000 }
+        ).trim();
+        if (uptimeOutput) {
+          uptime = new Date(uptimeOutput).getTime();
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    // Get memory usage
+    let memory = 0;
+    try {
+      const memOutput = execSync(
+        "systemctl show mcp-gateway --property=MemoryCurrent --value 2>/dev/null",
+        { encoding: "utf-8", timeout: 2000 }
+      ).trim();
+      if (memOutput && memOutput !== "[not set]") {
+        memory = Math.round(parseInt(memOutput) / 1024 / 1024); // MB
+      }
+    } catch {
+      // Ignore
+    }
+
+    return {
+      pm_id: -1, // Not a PM2 process
+      name: "mcp-gateway",
+      status: isActive ? "online" : "stopped",
+      cpu: 0,
+      memory,
+      uptime,
+      restarts: 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // List all processes
 router.get("/", (_req: Request, res: Response) => {
   const processes = getPM2Processes();
 
   // Group processes
-  const core = processes.filter(p => ["watcher", "dashboard-api"].includes(p.name));
-  const mcp = processes.filter(p => p.name.startsWith("mcp-"));
-  const other = processes.filter(p => !["watcher", "dashboard-api"].includes(p.name) && !p.name.startsWith("mcp-"));
+  const corePm2 = processes.filter(p => ["watcher", "dashboard-api"].includes(p.name));
+  const other = processes.filter(p => !["watcher", "dashboard-api"].includes(p.name));
+
+  // Get MCP gateway (systemd service) and add to core
+  const mcpGateway = getMcpGatewayStatus();
+  const core = mcpGateway ? [...corePm2, mcpGateway] : corePm2;
 
   res.json({
     core,
-    mcp,
+    mcp: [], // No longer used, kept for backwards compatibility
     other,
-    total: processes.length,
-    running: processes.filter(p => p.status === "online").length,
+    total: processes.length + (mcpGateway ? 1 : 0),
+    running: processes.filter(p => p.status === "online").length + (mcpGateway?.status === "online" ? 1 : 0),
   });
 });
 
 // Restart a process
 router.post("/:name/restart", (req: Request, res: Response) => {
   const { name } = req.params;
+
+  // MCP gateway is a systemd service, not PM2
+  if (name === "mcp-gateway") {
+    exec("sudo systemctl restart mcp-gateway", { timeout: 30000 }, (error, stdout, stderr) => {
+      if (error) {
+        res.status(500).json({ error: `Failed to restart mcp-gateway`, details: stderr });
+      } else {
+        res.json({ success: true, message: `Restarted mcp-gateway` });
+      }
+    });
+    return;
+  }
 
   // Safety check - don't allow restarting the dashboard while we're serving from it
   if (name === "dashboard-api") {
@@ -91,6 +160,18 @@ router.post("/:name/stop", (req: Request, res: Response) => {
     return;
   }
 
+  // MCP gateway is a systemd service
+  if (name === "mcp-gateway") {
+    exec("sudo systemctl stop mcp-gateway", { timeout: 10000 }, (error, stdout, stderr) => {
+      if (error) {
+        res.status(500).json({ error: `Failed to stop mcp-gateway`, details: stderr });
+      } else {
+        res.json({ success: true, message: `Stopped mcp-gateway` });
+      }
+    });
+    return;
+  }
+
   exec(`pm2 stop ${name}`, { timeout: 10000 }, (error, stdout, stderr) => {
     if (error) {
       res.status(500).json({ error: `Failed to stop ${name}`, details: stderr });
@@ -103,6 +184,18 @@ router.post("/:name/stop", (req: Request, res: Response) => {
 // Start a process
 router.post("/:name/start", (req: Request, res: Response) => {
   const { name } = req.params;
+
+  // MCP gateway is a systemd service
+  if (name === "mcp-gateway") {
+    exec("sudo systemctl start mcp-gateway", { timeout: 10000 }, (error, stdout, stderr) => {
+      if (error) {
+        res.status(500).json({ error: `Failed to start mcp-gateway`, details: stderr });
+      } else {
+        res.json({ success: true, message: `Started mcp-gateway` });
+      }
+    });
+    return;
+  }
 
   exec(`pm2 start ${name}`, { timeout: 10000 }, (error, stdout, stderr) => {
     if (error) {
@@ -117,6 +210,21 @@ router.post("/:name/start", (req: Request, res: Response) => {
 router.get("/:name/logs", (req: Request, res: Response) => {
   const { name } = req.params;
   const lines = parseInt(req.query.lines as string) || 50;
+
+  // MCP gateway logs are in a file
+  if (name === "mcp-gateway") {
+    try {
+      const logFile = "/home/ubuntu/pHouseMcp/logs/gateway.log";
+      const output = execSync(`tail -n ${lines} ${logFile} 2>&1`, {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+      res.json({ logs: output });
+    } catch (error) {
+      res.status(500).json({ error: `Failed to get logs for mcp-gateway` });
+    }
+    return;
+  }
 
   try {
     const output = execSync(`pm2 logs ${name} --lines ${lines} --nostream 2>&1`, {
@@ -174,23 +282,26 @@ router.get("/counts", (_req: Request, res: Response) => {
 router.post("/group/:group/restart", (req: Request, res: Response) => {
   const { group } = req.params;
 
-  let pattern: string;
   if (group === "core") {
-    pattern = "watcher dashboard-api";
+    exec("pm2 restart watcher dashboard-api", { timeout: 30000 }, (error, stdout, stderr) => {
+      if (error) {
+        res.status(500).json({ error: `Failed to restart core`, details: stderr });
+      } else {
+        res.json({ success: true, message: `Restarted core` });
+      }
+    });
   } else if (group === "mcp") {
-    pattern = "mcp-*";
+    // MCP runs as systemd service now
+    exec("sudo systemctl restart mcp-gateway", { timeout: 30000 }, (error, stdout, stderr) => {
+      if (error) {
+        res.status(500).json({ error: `Failed to restart mcp-gateway`, details: stderr });
+      } else {
+        res.json({ success: true, message: `Restarted mcp-gateway` });
+      }
+    });
   } else {
     res.status(400).json({ error: "Invalid group" });
-    return;
   }
-
-  exec(`pm2 restart ${pattern}`, { timeout: 30000 }, (error, stdout, stderr) => {
-    if (error) {
-      res.status(500).json({ error: `Failed to restart ${group}`, details: stderr });
-    } else {
-      res.json({ success: true, message: `Restarted ${group}` });
-    }
-  });
 });
 
 export default router;

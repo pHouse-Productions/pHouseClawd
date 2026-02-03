@@ -189,7 +189,7 @@ router.post("/", async (req: Request, res: Response) => {
         });
 
         // Step 2: Restart systemd service
-        execSync("sudo systemctl restart mcp-servers", {
+        execSync("sudo systemctl restart mcp-gateway", {
           encoding: "utf-8",
           timeout: 30000,
         });

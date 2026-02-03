@@ -120,38 +120,44 @@ After initial setup, use the **dashboard** to:
 
 ## Project Structure
 
+The system is split between **infrastructure code** (git-tracked) and **runtime data** (not git-tracked):
+
 ```
-pHouseClawd/
-├── CLAUDE.md              # Your assistant's personality and instructions
-├── config/
-│   ├── channels.json      # Enabled/disabled channels
-│   ├── cron.json          # Scheduled tasks
-│   ├── email-security.json # Email security settings
-│   ├── gchat-security.json # Google Chat security settings
-│   └── discord-security.json # Discord security settings
-├── core/
-│   └── src/
-│       ├── watcher.ts     # Main event processor
-│       ├── events.ts      # Event queue system
-│       └── channels/      # Channel handlers (telegram, email, gchat, discord)
-├── listeners/
-│   ├── telegram/          # Telegram message listener daemon
-│   ├── gmail/             # Gmail inbox watcher daemon
-│   ├── gchat/             # Google Chat listener
-│   └── discord/           # Discord bot listener
-├── api/                   # Express API server (port 3100)
-├── dashboard/             # Web UI (Vite + React, static files)
-├── memory/
-│   ├── short-term/        # Global conversation buffer (auto-logged, gitignored)
-│   ├── long-term/         # Persistent memories (gitignored)
-│   ├── telegram/          # Telegram-specific context
-│   ├── discord/           # Discord-specific context
-│   ├── email/             # Email-specific context
-│   └── gchat/             # GChat-specific context
-├── leads/                 # Business leads tracker (gitignored)
-├── websites/              # Generated client websites
-└── logs/                  # Application logs (gitignored)
+/home/ubuntu/
+├── pHouseClawd/           # Git repo - watcher + dashboard infra
+│   ├── core/              # Watcher source code
+│   │   └── src/
+│   │       ├── watcher.ts # Main event processor
+│   │       └── channels/  # Channel handlers
+│   ├── api/               # Express API server (port 3100)
+│   ├── dashboard/         # Web UI (Vite + React)
+│   ├── listeners/         # Legacy listeners (being phased out)
+│   └── logs/              # Application logs
+│
+├── pHouseMcp/             # Git repo - MCP servers
+│   └── servers/           # telegram, gmail, discord, etc.
+│
+├── assistant/             # NOT git - Claude's runtime home
+│   ├── CLAUDE.md          # Auto-generated (SOUL.md + SYSTEM.md)
+│   ├── SOUL.md            # Your assistant's personality
+│   ├── SYSTEM.md          # System architecture docs
+│   ├── .claude/           # Skills, settings
+│   ├── config/            # channels.json, cron.json, security configs
+│   └── memory/            # Short-term buffer, long-term memories
+│       ├── short-term/    # Rolling conversation buffer
+│       ├── long-term/     # Persistent memories
+│       ├── telegram/      # Channel-specific context
+│       ├── discord/
+│       ├── email/
+│       └── gchat/
+│
+└── hosted-sites/          # Client websites and apps
 ```
+
+**Why the separation?**
+- Infrastructure code can be version-controlled and shared
+- Runtime data (memory, config, credentials) stays local and private
+- Claude runs in `assistant/` where it has its personality and memory
 
 ## MCP Servers (Tools)
 
@@ -251,16 +257,18 @@ You can also tell Claude directly what you want:
 - "Remind me to check my calendar every morning at 9am"
 - "Update my address to 123 Main St"
 
-**Configuration files (all gitignored):**
+**Configuration files (in `assistant/`, not git-tracked):**
 
 | File | Purpose |
 |------|---------|
-| `SOUL.md` | Your assistant's personality, your info, preferences (CLAUDE.md is auto-generated) |
+| `SOUL.md` | Your assistant's personality, your info, preferences |
+| `SYSTEM.md` | System architecture documentation |
+| `CLAUDE.md` | Auto-generated from SOUL.md + SYSTEM.md |
 | `config/cron.json` | Scheduled tasks and reminders |
 | `config/channels.json` | Enabled communication channels |
 | `config/email-security.json` | Trusted email addresses for auto-reply |
 | `config/gchat-security.json` | Whitelisted Google Chat spaces |
-| `dashboard/.env.local` | Dashboard password and URL |
+| `config/discord-security.json` | Discord channel permissions |
 
 ## Email Security
 
@@ -345,7 +353,7 @@ This shows all members with their user IDs. The bot account is the one that join
 
 ### Step 8: Configure Security Settings
 
-Add the space ID and your bot's user ID to `config/gchat-security.json`:
+Add the space ID and your bot's user ID to `assistant/config/gchat-security.json`:
 
 ```json
 {
@@ -386,13 +394,13 @@ Your assistant will now respond to messages in the whitelisted Google Chat space
 
 ## Customization
 
-Your assistant's personality lives in `CLAUDE.md`. The install script creates this as a seed file, and your assistant will run through an onboarding conversation to fill it in:
+Your assistant's personality lives in `assistant/SOUL.md`. The install script creates this as a seed file, and your assistant will run through an onboarding conversation to fill it in:
 - Pick a name together
 - Communication style (formal, casual, funny, whatever)
 - Your personal info and preferences
 - Important context about your life/work
 
-The assistant updates `CLAUDE.md` itself as it learns about you.
+The assistant updates `SOUL.md` itself as it learns about you. `CLAUDE.md` is auto-generated by merging `SOUL.md` + `SYSTEM.md` before each job.
 
 ## Running Your Assistant
 
@@ -437,6 +445,7 @@ Claude will generate a dashboard password during setup. You can change it anytim
 cd pHouseClawd
 git pull origin main
 cd core && npm install && cd ..  # Install any new dependencies
+pm2 restart watcher dashboard-api  # Restart services
 ```
 
 **pHouseMcp:**
@@ -445,9 +454,10 @@ cd pHouseMcp
 git pull origin main
 npm install    # Install any new dependencies
 npm run build  # Rebuild after pulling updates!
+sudo systemctl restart mcp-gateway  # Restart MCP servers
 ```
 
-Your personal files (`CLAUDE.md`, `config/*.json`, `memory/`, `leads/`) are gitignored and won't be affected.
+Your personal files in `assistant/` (SOUL.md, config/, memory/) are not git-tracked and won't be affected by updates.
 
 ## License
 

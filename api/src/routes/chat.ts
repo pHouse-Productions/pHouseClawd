@@ -3,12 +3,13 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import multer from "multer";
-import { getProjectRoot, getLocalTimestamp } from "../utils.js";
+import { getProjectRoot, getAssistantRoot, getLocalTimestamp } from "../utils.js";
 
 const router = Router();
 
 const PROJECT_ROOT = getProjectRoot();
-const MEMORY_DIR = path.join(PROJECT_ROOT, "memory");
+const ASSISTANT_ROOT = getAssistantRoot();
+const MEMORY_DIR = path.join(ASSISTANT_ROOT, "memory");
 const QUEUE_FILE = path.join(MEMORY_DIR, "dashboard-queue.json");
 const CHAT_FILE = path.join(MEMORY_DIR, "dashboard-chat.jsonl");
 const TYPING_LOCK = path.join(MEMORY_DIR, "dashboard-typing.lock");

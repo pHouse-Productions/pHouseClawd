@@ -1,6 +1,0 @@
-{
-  "trustedEmailAddresses": [
-    "your-email@example.com"
-  ],
-  "forwardUntrustedTo": "your-email@example.com"
-}

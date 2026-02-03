@@ -66,40 +66,26 @@ function checkPort(port: number): ProcessStatus {
 }
 
 function getMcpStatus(): McpStatus {
-  // Lightweight check - just verify ports are in use (servers are listening)
-  const MCP_CONFIG_PATH = path.join(process.env.HOME || "/home/ubuntu", "pHouseMcp", "mcp-servers.json");
-
+  // Check the MCP gateway health endpoint (single server on port 3000)
   try {
-    const config = JSON.parse(fs.readFileSync(MCP_CONFIG_PATH, "utf-8")) as { servers?: Record<string, { port?: number }> };
-    const servers = config.servers || {};
-    const ports: number[] = [];
-    for (const key of Object.keys(servers)) {
-      const port = servers[key]?.port;
-      if (port) ports.push(port);
+    const output = execSync("curl -s --connect-timeout 2 http://127.0.0.1:3000/health 2>/dev/null || echo '{}'", {
+      encoding: "utf-8",
+      timeout: 5000,
+    }).trim();
+
+    const health = JSON.parse(output);
+    if (health.status === "ok") {
+      // Gateway is healthy - count servers from Claude config
+      const claudeConfigPath = path.join(process.env.HOME || "/home/ubuntu", ".claude.json");
+      const config = JSON.parse(fs.readFileSync(claudeConfigPath, "utf-8"));
+      const mcpServers = config.mcpServers || {};
+      // Count HTTP servers pointing to gateway (exclude stdio like playwright)
+      const gatewayServers = Object.values(mcpServers).filter(
+        (s: any) => s.type === "http" && s.url?.includes("127.0.0.1:3000")
+      ).length;
+      return { total: gatewayServers, healthy: gatewayServers, error: 0 };
     }
-
-    // Check all ports in a single lsof call (faster than per-port checks)
-    let healthy = 0;
-
-    try {
-      // lsof -i:3001 -i:3002 ... returns lines with port info for ports in use
-      const portArgs = ports.map(p => `-i:${p}`).join(" ");
-      const output = execSync(`lsof ${portArgs} -P -n 2>/dev/null | grep LISTEN || true`, {
-        encoding: "utf-8",
-        timeout: 2000,
-      }).trim();
-
-      // Count which ports appear in the output
-      for (const port of ports) {
-        if (output.includes(`:${port}`)) {
-          healthy++;
-        }
-      }
-    } catch {
-      // If lsof fails entirely, assume all down
-    }
-
-    return { total: ports.length, healthy, error: ports.length - healthy };
+    return { total: 0, healthy: 0, error: 0 };
   } catch {
     return { total: 0, healthy: 0, error: 0 };
   }

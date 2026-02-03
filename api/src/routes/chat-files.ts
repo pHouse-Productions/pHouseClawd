@@ -1,11 +1,21 @@
 import { Router, Request, Response } from "express";
 import fs from "fs/promises";
 import path from "path";
-import { getProjectRoot } from "../utils.js";
+import { getProjectRoot, getAssistantRoot } from "../utils.js";
 
 const router = Router();
 
-const FILES_DIR = path.join(getProjectRoot(), "memory", "dashboard", "files");
+const PROJECT_ROOT = getProjectRoot();
+const ASSISTANT_ROOT = getAssistantRoot();
+const FILES_DIR = path.join(ASSISTANT_ROOT, "memory", "dashboard", "files");
+
+// Allowed directories for serving files
+const ALLOWED_DIRS = [
+  FILES_DIR,                                     // memory/dashboard/files
+  "/home/ubuntu/hosted-sites",                   // hosted site files
+  path.join(PROJECT_ROOT, "dashboard", "public"),// dashboard public assets
+  "/tmp/claude-",                                // scratchpad files
+];
 
 // MIME type mapping
 const MIME_TYPES: Record<string, string> = {
@@ -45,11 +55,14 @@ router.get("/", async (req: Request, res: Response) => {
     return;
   }
 
-  // Security: Ensure the path is within the allowed directory
+  // Security: Ensure the path is within allowed directories
   const normalizedPath = path.normalize(filePath);
-  const normalizedFilesDir = path.normalize(FILES_DIR);
 
-  if (!normalizedPath.startsWith(normalizedFilesDir)) {
+  const isAllowed = ALLOWED_DIRS.some(dir =>
+    normalizedPath.startsWith(path.normalize(dir))
+  );
+
+  if (!isAllowed) {
     res.status(403).json({ error: "Access denied" });
     return;
   }

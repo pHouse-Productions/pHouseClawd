@@ -1,23 +1,25 @@
 import { Router, Request, Response } from "express";
 import fs from "fs/promises";
 import path from "path";
-import { getProjectRoot, parseEnvFile, writeEnvFile, readJsonFile, writeJsonFile } from "../utils.js";
+import { getProjectRoot, getAssistantRoot, parseEnvFile, writeEnvFile, readJsonFile, writeJsonFile } from "../utils.js";
 
 const router = Router();
 
 const PROJECT_ROOT = getProjectRoot();
+const ASSISTANT_ROOT = getAssistantRoot();
 const MCP_ROOT = path.resolve(PROJECT_ROOT, "../pHouseMcp");
 const MCP_ENV_FILE = path.join(MCP_ROOT, ".env");
 const GOOGLE_TOKEN_FILE = path.join(MCP_ROOT, "credentials/tokens.json");
 const GOOGLE_CREDENTIALS_FILE = path.join(MCP_ROOT, "credentials/client_secret.json");
 const API_ENV_FILE = path.join(PROJECT_ROOT, "api/.env.local");
-const CHANNELS_CONFIG = path.join(PROJECT_ROOT, "config/channels.json");
-const EMAIL_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/email-security.json");
-const GCHAT_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/gchat-security.json");
-const DISCORD_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/discord-security.json");
-const MEMORY_SETTINGS_CONFIG = path.join(PROJECT_ROOT, "config/memory-settings.json");
-const SOUL_MD_FILE = path.join(PROJECT_ROOT, "SOUL.md");
-const SYSTEM_MD_FILE = path.join(PROJECT_ROOT, "SYSTEM.md");
+// Config files live in assistant directory
+const CHANNELS_CONFIG = path.join(ASSISTANT_ROOT, "config/channels.json");
+const EMAIL_SECURITY_CONFIG = path.join(ASSISTANT_ROOT, "config/email-security.json");
+const GCHAT_SECURITY_CONFIG = path.join(ASSISTANT_ROOT, "config/gchat-security.json");
+const DISCORD_SECURITY_CONFIG = path.join(ASSISTANT_ROOT, "config/discord-security.json");
+const MEMORY_SETTINGS_CONFIG = path.join(ASSISTANT_ROOT, "config/memory-settings.json");
+const SOUL_MD_FILE = path.join(ASSISTANT_ROOT, "SOUL.md");
+const SYSTEM_MD_FILE = path.join(ASSISTANT_ROOT, "SYSTEM.md");
 
 // Config schema - keys exposed in UI
 export const CONFIG_SCHEMA = {

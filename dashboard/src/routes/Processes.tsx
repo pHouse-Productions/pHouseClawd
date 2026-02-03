@@ -295,7 +295,8 @@ export default function Processes() {
         </div>
       </div>
 
-      {/* MCP Servers */}
+      {/* MCP Servers - only show if there are any (legacy, now in core) */}
+      {data.mcp.length > 0 && (
       <div className="bg-zinc-900 rounded-lg overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <h2 className="font-semibold">MCP Servers</h2>
@@ -328,6 +329,7 @@ export default function Processes() {
         </table>
         </div>
       </div>
+      )}
 
       {/* Other Processes (if any) */}
       {data.other.length > 0 && (

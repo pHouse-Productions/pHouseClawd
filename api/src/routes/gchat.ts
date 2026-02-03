@@ -2,15 +2,16 @@ import { Router, Request, Response } from "express";
 import { google } from "googleapis";
 import fs from "fs/promises";
 import path from "path";
-import { getProjectRoot } from "../utils.js";
+import { getProjectRoot, getAssistantRoot } from "../utils.js";
 
 const router = Router();
 
 const PROJECT_ROOT = getProjectRoot();
+const ASSISTANT_ROOT = getAssistantRoot();
 const MCP_ROOT = path.resolve(PROJECT_ROOT, "../pHouseMcp");
 const CREDENTIALS_PATH = path.join(MCP_ROOT, "credentials/client_secret.json");
 const TOKEN_PATH = path.join(MCP_ROOT, "credentials/tokens.json");
-const GCHAT_SECURITY_CONFIG = path.join(PROJECT_ROOT, "config/gchat-security.json");
+const GCHAT_SECURITY_CONFIG = path.join(ASSISTANT_ROOT, "config/gchat-security.json");
 
 interface GChatSecurityConfig {
   allowedSpaces: string[];
